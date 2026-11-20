@@ -50,7 +50,9 @@ private[effect] final class PollHandleLock {
       }
     }
 
-  /** Returns true if the lock was acquired directly; false if `w` is now queued. */
+  /**
+   * Returns true if the lock was acquired directly; false if `w` is now queued.
+   */
   @tailrec private[this] def enqueueOrAcquire(w: Waiter): Boolean = {
     val s = state.get()
     if (s eq Free) {
@@ -61,7 +63,9 @@ private[effect] final class PollHandleLock {
     }
   }
 
-  /** A canceled waiter leaves the queue; if it had already been granted the lock, pass it on. */
+  /**
+   * A canceled waiter leaves the queue; if it had already been granted the lock, pass it on.
+   */
   @tailrec private[this] def cancel(w: Waiter): Unit = {
     val s = state.get()
     val idx = s.waiters.indexWhere(_ eq w)

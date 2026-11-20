@@ -133,17 +133,23 @@ object EchoServer extends IOApp {
       case other => IO.raiseError(new IllegalArgumentException(other))
     }
 
-  /** The hint needs the epoll handle's ready counters; kqueue (macOS) has none. */
+  /**
+   * The hint needs the epoll handle's ready counters; kqueue (macOS) has none.
+   */
   private def edgeTriggered(h: FileDescriptorPollHandle): Boolean =
     h.isInstanceOf[EdgeTriggeredPollHandle]
 
   private final class Conn(fd: Int, h: FileDescriptorPollHandle, hint: Boolean) {
     private[this] val et = if (hint) h.asInstanceOf[EdgeTriggeredPollHandle] else null
 
-    /** Read-ready count seen before a short read; -1 if not known to be drained. */
+    /**
+     * Read-ready count seen before a short read; -1 if not known to be drained.
+     */
     private[this] var drainedAt: Int = -1
 
-    /** One read attempt: n > 0 bytes, -1 at EOF, Int.MinValue on EAGAIN. */
+    /**
+     * One read attempt: n > 0 bytes, -1 at EOF, Int.MinValue on EAGAIN.
+     */
     private def readOnce(buf: Ptr[Byte], len: Int): Int = {
       val before = et.readReadyCount
       val n = unistd.read(fd, buf, len.toCSize)
@@ -191,19 +197,18 @@ object EchoServer extends IOApp {
       }
 
     def runNative: IO[Unit] =
-      Resource
-        .make(IO(stdlib.malloc(BufSize.toCSize)))(p => IO(stdlib.free(p)))
-        .use { buf =>
-          def loop: IO[Unit] =
-            read(buf, BufSize).flatMap { n => if (n < 0) IO.unit else writeAll(buf, n) >> loop }
-          loop
-        }
+      Resource.make(IO(stdlib.malloc(BufSize.toCSize)))(p => IO(stdlib.free(p))).use { buf =>
+        def loop: IO[Unit] =
+          read(buf, BufSize).flatMap { n => if (n < 0) IO.unit else writeAll(buf, n) >> loop }
+        loop
+      }
 
-    /** Reads into a scratch buffer and copies into a fresh array, as fs2 would. */
+    /**
+     * Reads into a scratch buffer and copies into a fresh array, as fs2 would.
+     */
     def runHeap: IO[Unit] =
-      Resource
-        .make(IO(stdlib.malloc(BufSize.toCSize)))(p => IO(stdlib.free(p)))
-        .use { scratch =>
+      Resource.make(IO(stdlib.malloc(BufSize.toCSize)))(p => IO(stdlib.free(p))).use {
+        scratch =>
           def loop: IO[Unit] =
             read(scratch, BufSize).flatMap { n =>
               if (n < 0) IO.unit
@@ -214,6 +219,6 @@ object EchoServer extends IOApp {
               }
             }
           loop
-        }
+      }
   }
 }

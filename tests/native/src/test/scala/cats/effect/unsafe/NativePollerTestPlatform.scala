@@ -30,7 +30,10 @@ import scala.scalanative.unsigned._
 
 import java.io.IOException
 
-/** [[PollerTestPlatform]] over `@extern` (Linux epoll; the runtime contract also runs on kqueue). */
+/**
+ * [[PollerTestPlatform]] over `@extern` (Linux epoll; the runtime contract also runs on
+ * kqueue).
+ */
 trait NativePollerTestPlatform extends PollerTestPlatform {
 
   // the JVM ignores SIGPIPE; Native would die on a write to a closed pipe instead of seeing EPIPE

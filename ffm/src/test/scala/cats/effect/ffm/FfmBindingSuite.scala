@@ -21,7 +21,9 @@ import cats.effect.ffm.internal.{Epoll, Libc}
 
 import munit.FunSuite
 
-/** Checks on the FFM bindings themselves; the poller contract is shared with Native. */
+/**
+ * Checks on the FFM bindings themselves; the poller contract is shared with Native.
+ */
 class FfmBindingSuite extends FunSuite {
 
   test("epoll_event matches the platform ABI") {

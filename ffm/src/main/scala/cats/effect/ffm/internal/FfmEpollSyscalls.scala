@@ -43,7 +43,10 @@ private[ffm] final class FfmEpollSyscalls(val maxEvents: Int, nanosecondTimeouts
   private[this] val ctlEvent: MemorySegment = arena.allocate(Epoll.EPOLL_EVENT)
   private[this] val timespec: MemorySegment = arena.allocate(Epoll.TIMESPEC)
   private[this] val drainBuf: MemorySegment = arena.allocate(8L, 8L)
-  /** errno capture for the owner thread; other threads use their own. */
+
+  /**
+   * errno capture for the owner thread; other threads use their own.
+   */
   private[this] val cap: MemorySegment = Libc.allocateCapture(arena)
 
   def epollCreate(): Int = {
@@ -80,13 +83,20 @@ private[ffm] final class FfmEpollSyscalls(val maxEvents: Int, nanosecondTimeouts
         Epoll.epollPwait2(cap, epfd, events, maxEvents, timespec)
       } else {
         val millis = (nanos + 999999L) / 1000000L
-        Epoll.epollWait(cap, epfd, events, maxEvents, Math.min(millis, Int.MaxValue.toLong).toInt)
+        Epoll.epollWait(
+          cap,
+          epfd,
+          events,
+          maxEvents,
+          Math.min(millis, Int.MaxValue.toLong).toInt)
       }
     if (rtn >= 0) rtn else -Libc.errno(cap)
   }
 
   def eventFlags(i: Int): Int =
-    events.get(ValueLayout.JAVA_INT, i * Epoll.EPOLL_EVENT_SIZE + Epoll.EPOLL_EVENT_EVENTS_OFFSET)
+    events.get(
+      ValueLayout.JAVA_INT,
+      i * Epoll.EPOLL_EVENT_SIZE + Epoll.EPOLL_EVENT_EVENTS_OFFSET)
 
   def eventData(i: Int): Long =
     events.get(
@@ -113,7 +123,9 @@ private[ffm] final class FfmEpollSyscalls(val maxEvents: Int, nanosecondTimeouts
 
 private[ffm] object FfmEpollSyscalls {
 
-  /** A constant 8-byte `1L` to write to an eventfd. Read-only, so shared. */
+  /**
+   * A constant 8-byte `1L` to write to an eventfd. Read-only, so shared.
+   */
   private val One: MemorySegment = {
     val s = Arena.global().allocate(8L, 8L)
     s.set(ValueLayout.JAVA_LONG, 0L, 1L)

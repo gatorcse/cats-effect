@@ -21,8 +21,8 @@ import cats.effect.unsafe.metrics.PollerMetrics
 
 /**
  * The `PollingSystem` half of the shared epoll backend. Platform modules supply only the
- * syscalls, by implementing `makePoller`: the `cats-effect-ffm` module's `FfmEpollSystem` on the
- * JVM, and `EpollSystem` on Scala Native.
+ * syscalls, by implementing `makePoller`: the `cats-effect-ffm` module's `FfmEpollSystem` on
+ * the JVM, and `EpollSystem` on Scala Native.
  */
 abstract class EpollPollingSystem private[effect] () extends PollingSystem {
 
@@ -41,7 +41,9 @@ abstract class EpollPollingSystem private[effect] () extends PollingSystem {
 
   def needsPoll(poller: Poller): Boolean = poller.needsPoll()
 
-  /** The owner thread never wakes itself: it is not parked. */
+  /**
+   * The owner thread never wakes itself: it is not parked.
+   */
   def interrupt(targetThread: Thread, targetPoller: Poller): Unit =
     if (Thread.currentThread() ne targetThread) targetPoller.interrupt()
 

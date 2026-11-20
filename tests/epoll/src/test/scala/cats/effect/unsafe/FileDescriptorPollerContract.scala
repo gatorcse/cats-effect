@@ -113,45 +113,49 @@ abstract class FileDescriptorPollerContract extends FunSuite with PollerTestPlat
   real("pollReadRec reads until hang-up then terminates with EOF") {
     pipeResource.use {
       case (r, w) =>
-        FileDescriptorPoller.get.flatMap(_.registerFileDescriptor(r, true, false).use { h =>
-          for {
-            gate <- Deferred[IO, Unit]
-            buf = new Array[Byte](1)
-            reader = h.pollReadRec(()) { _ =>
-              IO(tryRead(r, buf, 0, 1)).flatTap {
-                case Left(_) => gate.complete(()).void
-                case Right(_) => IO.unit
+        FileDescriptorPoller
+          .get
+          .flatMap(_.registerFileDescriptor(r, true, false).use { h =>
+            for {
+              gate <- Deferred[IO, Unit]
+              buf = new Array[Byte](1)
+              reader = h.pollReadRec(()) { _ =>
+                IO(tryRead(r, buf, 0, 1)).flatTap {
+                  case Left(_) => gate.complete(()).void
+                  case Right(_) => IO.unit
+                }
               }
-            }
-            n <- reader
-              .background
-              .use(join => gate.get >> IO(close(w)) >> join.flatMap(_.embedNever))
-          } yield assertEquals(n, -1)
-        })
+              n <- reader
+                .background
+                .use(join => gate.get >> IO(close(w)) >> join.flatMap(_.embedNever))
+            } yield assertEquals(n, -1)
+          })
     }
   }
 
   real("a closed reader wakes a blocked writer") {
     pipeResource.use {
       case (r, w) =>
-        FileDescriptorPoller.get.flatMap(_.registerFileDescriptor(w, false, true).use { h =>
-          val chunk = new Array[Byte](65536)
-          // fill the pipe until EAGAIN
-          IO { while (tryWrite(w, chunk, 0, chunk.length).isRight) () } >>
-            Deferred[IO, Unit]
-              .flatMap { blocked =>
-                val writer = h.pollWriteRec(()) { _ =>
-                  IO(tryWrite(w, chunk, 0, chunk.length)).flatTap {
-                    case Left(_) => blocked.complete(()).void
-                    case Right(_) => IO.unit
+        FileDescriptorPoller
+          .get
+          .flatMap(_.registerFileDescriptor(w, false, true).use { h =>
+            val chunk = new Array[Byte](65536)
+            // fill the pipe until EAGAIN
+            IO { while (tryWrite(w, chunk, 0, chunk.length).isRight) () } >>
+              Deferred[IO, Unit]
+                .flatMap { blocked =>
+                  val writer = h.pollWriteRec(()) { _ =>
+                    IO(tryWrite(w, chunk, 0, chunk.length)).flatTap {
+                      case Left(_) => blocked.complete(()).void
+                      case Right(_) => IO.unit
+                    }
+                  }
+                  writer.attempt.background.use { join =>
+                    blocked.get >> IO(close(r)) >> join.flatMap(_.embedNever)
                   }
                 }
-                writer.attempt.background.use { join =>
-                  blocked.get >> IO(close(r)) >> join.flatMap(_.embedNever)
-                }
-              }
-              .map(res => assert(res.isLeft, s"expected EPIPE, got $res"))
-        })
+                .map(res => assert(res.isLeft, s"expected EPIPE, got $res"))
+          })
     }
   }
 

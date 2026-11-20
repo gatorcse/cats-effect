@@ -24,7 +24,9 @@ package unsafe
  */
 trait PollerTestPlatform {
 
-  /** True where the epoll backend exists (Linux). The runtime contract runs everywhere. */
+  /**
+   * True where the epoll backend exists (Linux). The runtime contract runs everywhere.
+   */
   def epollSupported: Boolean
 
   def epollPwait2Available: Boolean
@@ -33,21 +35,31 @@ trait PollerTestPlatform {
 
   def epollSystem(): EpollPollingSystem
 
-  /** The polling system for the runtime contract; `None` uses the platform default. */
+  /**
+   * The polling system for the runtime contract; `None` uses the platform default.
+   */
   def runtimePollingSystem: Option[PollingSystem]
 
-  /** A non-blocking, close-on-exec pipe as (readFd, writeFd). */
+  /**
+   * A non-blocking, close-on-exec pipe as (readFd, writeFd).
+   */
   def pipe(): (Int, Int)
 
   def close(fd: Int): Unit
 
-  /** Non-blocking read: `Left(())` on EAGAIN, `Right(-1)` at EOF. Throws on other errors. */
+  /**
+   * Non-blocking read: `Left(())` on EAGAIN, `Right(-1)` at EOF. Throws on other errors.
+   */
   def tryRead(fd: Int, buf: Array[Byte], off: Int, len: Int): Either[Unit, Int]
 
-  /** Non-blocking write: `Left(())` on EAGAIN. Throws on other errors (EPIPE included). */
+  /**
+   * Non-blocking write: `Left(())` on EAGAIN. Throws on other errors (EPIPE included).
+   */
   def tryWrite(fd: Int, buf: Array[Byte], off: Int, len: Int): Either[Unit, Int]
 
-  /** A non-blocking TCP socket that was never connected. */
+  /**
+   * A non-blocking TCP socket that was never connected.
+   */
   def unconnectedTcpSocket(): Int
 
   final def writeUnsafe(fd: Int, bytes: Array[Byte]): Unit =

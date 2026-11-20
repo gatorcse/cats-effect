@@ -29,7 +29,9 @@ import scala.scalanative.unsigned._
 
 import java.io.IOException
 
-/** [[EpollSyscalls]] through Scala Native `@extern` calls. */
+/**
+ * [[EpollSyscalls]] through Scala Native `@extern` calls.
+ */
 private[unsafe] final class NativeEpollSyscalls(val maxEvents: Int, nanosecondTimeouts: Boolean)
     extends EpollSyscalls {
 
@@ -73,12 +75,15 @@ private[unsafe] final class NativeEpollSyscalls(val maxEvents: Int, nanosecondTi
       else if (nanosecondTimeouts) {
         timespec(0) = nanos / 1000000000L
         timespec(1) = nanos % 1000000000L
-        epoll.awaiting
+        epoll
+          .awaiting
           .syscall(SYS_epoll_pwait2, epfd.toLong, events, maxEvents.toLong, timespec, null, 0L)
           .toInt
       } else {
         val millis = (nanos + 999999L) / 1000000L
-        epoll.awaiting.epoll_wait(epfd, events, maxEvents, Math.min(millis, Int.MaxValue.toLong).toInt)
+        epoll
+          .awaiting
+          .epoll_wait(epfd, events, maxEvents, Math.min(millis, Int.MaxValue.toLong).toInt)
       }
     if (rtn >= 0) rtn else -errno
   }
@@ -119,10 +124,14 @@ private[unsafe] object NativeEpollSyscalls {
   final val EPOLL_CTL_ADD = 1
   final val EPOLL_CTL_DEL = 2
 
-  /** `epoll_pwait2` has the same number on every architecture (new syscalls are unified). */
+  /**
+   * `epoll_pwait2` has the same number on every architecture (new syscalls are unified).
+   */
   final val SYS_epoll_pwait2 = 441L
 
-  /** `struct epoll_event` is packed (12 bytes) on x86_64 only. */
+  /**
+   * `struct epoll_event` is packed (12 bytes) on x86_64 only.
+   */
   val EventSize: Long = if (LinktimeInfo.target.arch == "x86_64") 12L else 16L
   val DataOffset: Long = if (LinktimeInfo.target.arch == "x86_64") 4L else 8L
 
@@ -130,8 +139,9 @@ private[unsafe] object NativeEpollSyscalls {
     new IOException(s"$op failed: ${fromCString(strerror(errno))}")
 
   /**
-   * Whether `epoll_pwait2` (Linux 5.11+) works here. Called through `syscall(2)` so that it does
-   * not depend on the libc version; a seccomp profile may still block it, so make a real call.
+   * Whether `epoll_pwait2` (Linux 5.11+) works here. Called through `syscall(2)` so that it
+   * does not depend on the libc version; a seccomp profile may still block it, so make a real
+   * call.
    */
   lazy val epollPwait2Available: Boolean = {
     val epfd = epoll.epoll_create1(EPOLL_CLOEXEC)
@@ -157,7 +167,9 @@ private[unsafe] object NativeEpollSyscalls {
       @blocking
       def epoll_wait(epfd: Int, events: Ptr[Byte], maxevents: Int, timeout: Int): Int = extern
 
-      /** `syscall(2)` with a fixed prototype; all arguments are integers or pointers. */
+      /**
+       * `syscall(2)` with a fixed prototype; all arguments are integers or pointers.
+       */
       @blocking
       def syscall(
           number: Long,

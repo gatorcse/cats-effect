@@ -46,7 +46,8 @@ object EpollSystem extends EpollPollingSystem {
   override def interrupt(targetThread: Thread, targetPoller: Poller): Unit =
     super.interrupt(targetThread, targetPoller)
 
-  override def metrics(poller: Poller): cats.effect.unsafe.metrics.PollerMetrics = super.metrics(poller)
+  override def metrics(poller: Poller): cats.effect.unsafe.metrics.PollerMetrics =
+    super.metrics(poller)
 
   final class Poller private[EpollSystem] (sys: EpollSyscalls)
       extends EpollEventLoop.Poller(sys)

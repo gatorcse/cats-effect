@@ -25,9 +25,9 @@ import java.util.concurrent.atomic.AtomicReference
 import scala.concurrent.duration._
 
 /**
- * Contract tests that drive one epoll poller directly, without a runtime, so that event batches,
- * wake-ups and timeouts can be observed exactly. Each case names the Netty issue it guards. The
- * same cases run on the JVM (FFM) and on Scala Native (`@extern`).
+ * Contract tests that drive one epoll poller directly, without a runtime, so that event
+ * batches, wake-ups and timeouts can be observed exactly. Each case names the Netty issue it
+ * guards. The same cases run on the JVM (FFM) and on Scala Native (`@extern`).
  */
 abstract class EpollPollerContract extends FunSuite with PollerTestPlatform {
 
@@ -46,9 +46,12 @@ abstract class EpollPollerContract extends FunSuite with PollerTestPlatform {
   def register(p: EpollEventLoop.Poller, fd: Int, reads: Boolean, writes: Boolean) =
     p.register(fd, reads, writes).fold(throw _, identity)
 
-  /** Runs `poll` on another thread; the reference holds (result, elapsed nanos). */
-  def pollOnThread(p: EpollEventLoop.Poller, nanos: Long)
-      : (AtomicReference[(PollResult, Long)], CountDownLatch) = {
+  /**
+   * Runs `poll` on another thread; the reference holds (result, elapsed nanos).
+   */
+  def pollOnThread(
+      p: EpollEventLoop.Poller,
+      nanos: Long): (AtomicReference[(PollResult, Long)], CountDownLatch) = {
     val result = new AtomicReference[(PollResult, Long)]
     val done = new CountDownLatch(1)
     val t = new Thread(new Runnable {
@@ -142,7 +145,8 @@ abstract class EpollPollerContract extends FunSuite with PollerTestPlatform {
   }
 
   for (nanos <- List(true, false))
-    test(s"a 300us timed poll parks instead of spinning (netty#18137), nanosecondTimeouts=$nanos") {
+    test(
+      s"a 300us timed poll parks instead of spinning (netty#18137), nanosecondTimeouts=$nanos") {
       withPoller(nanos = nanos) { p =>
         val start = System.nanoTime()
         var polls = 0

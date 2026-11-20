@@ -26,13 +26,15 @@ import java.util.concurrent.atomic.{AtomicBoolean, AtomicInteger, AtomicLong}
 import EpollConstants._
 
 /**
- * The epoll event loop shared by the JVM (`cats-effect-ffm`'s `FfmEpollSystem`) and Scala Native
- * (`EpollSystem`): handle table, wake-ups, lifecycle and event dispatch. It calls the OS only
- * through [[EpollSyscalls]].
+ * The epoll event loop shared by the JVM (`cats-effect-ffm`'s `FfmEpollSystem`) and Scala
+ * Native (`EpollSystem`): handle table, wake-ups, lifecycle and event dispatch. It calls the OS
+ * only through [[EpollSyscalls]].
  */
 private[effect] object EpollEventLoop {
 
-  /** `epoll_data` of the poller's own wake-up eventfd. Never a valid handle id. */
+  /**
+   * `epoll_data` of the poller's own wake-up eventfd. Never a valid handle id.
+   */
   private final val WakeupId = -1L
 
   private def errnoException(op: String, errno: Int): IOException =
@@ -60,7 +62,9 @@ private[effect] object EpollEventLoop {
     def readReadyCount: Int = readReadyCounter
     def writeReadyCount: Int = writeReadyCounter
 
-    /** Called by the owning poller's thread with the event flags. */
+    /**
+     * Called by the owning poller's thread with the event flags.
+     */
     private[EpollEventLoop] def notify(events: Int): Unit = {
       if (reads && (events & ReadWake) != 0) {
         val counter = readReadyCounter + 1
@@ -163,11 +167,12 @@ private[effect] object EpollEventLoop {
   private final val WriteWake =
     EPOLLOUT | EPOLLRDHUP | EPOLLHUP | EPOLLERR
 
-  /** Generations use 31 bits so that no id is ever [[WakeupId]]. */
+  /**
+   * Generations use 31 bits so that no id is ever [[WakeupId]].
+   */
   private final val GenerationMask = 0x7fffffff
 
-  class Poller private[effect] (sys: EpollSyscalls)
-      extends PollerMetrics {
+  class Poller private[effect] (sys: EpollSyscalls) extends PollerMetrics {
 
     private[this] val maxEvents = sys.maxEvents
     private[this] var readyEventCount: Int = 0
@@ -194,7 +199,9 @@ private[effect] object EpollEventLoop {
 
     private[this] val inFlight = new AtomicInteger(0)
 
-    /** Runs `f` only if the poller is open, and keeps it open until `f` returns. */
+    /**
+     * Runs `f` only if the poller is open, and keeps it open until `f` returns.
+     */
     @inline private[this] def whileOpen(f: => Unit): Unit = {
       if (inFlight.incrementAndGet() > 0) {
         try f
@@ -227,7 +234,9 @@ private[effect] object EpollEventLoop {
         sys.eventfdSignal(wakeFd)
       }
 
-    /** Number of eventfd writes so far; for tests of wake-up debouncing. */
+    /**
+     * Number of eventfd writes so far; for tests of wake-up debouncing.
+     */
     private[effect] def wakeupWriteCount: Long = wakeupWrites.get()
 
     // --- handle table (owner thread only, except pendingFree) ---------------------------------
@@ -237,7 +246,10 @@ private[effect] object EpollEventLoop {
     private[this] var freeSlots = new Array[Int](64)
     private[this] var freeCount = 0
     private[this] var nextSlot = 0
-    /** Slots released by any thread, reclaimed by the owner between batches. */
+
+    /**
+     * Slots released by any thread, reclaimed by the owner between batches.
+     */
     private[this] val pendingFree = new ConcurrentLinkedQueue[PollHandle]
     private[this] val registered = new AtomicInteger(0)
 
@@ -355,7 +367,9 @@ private[effect] object EpollEventLoop {
 
     private[effect] def needsPoll(): Boolean = registered.get() > 0
 
-    /** Number of live registrations. */
+    /**
+     * Number of live registrations.
+     */
     def registrationCount: Int = registered.get()
 
     // --- metrics ------------------------------------------------------------------------------

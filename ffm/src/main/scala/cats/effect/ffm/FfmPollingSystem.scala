@@ -36,25 +36,27 @@ import cats.effect.unsafe.{PollingSystem, SelectorSystem}
  */
 object FfmPollingSystem {
 
-  /** Why the FFM backend could not be used. */
+  /**
+   * Why the FFM backend could not be used.
+   */
   final case class Unavailable(reason: String)
 
   /**
    * The FFM polling system for this platform, or `SelectorSystem()` if there is none. When
-   * falling back, the reason is printed to stderr once unless
-   * `-Dcats.effect.ffm.quiet=true`.
+   * falling back, the reason is printed to stderr once unless `-Dcats.effect.ffm.quiet=true`.
    */
   def apply(): PollingSystem =
     select() match {
       case Right(system) => system
       case Left(Unavailable(reason)) =>
         if (!java.lang.Boolean.getBoolean("cats.effect.ffm.quiet"))
-          System.err.println(
-            s"[cats-effect-ffm] falling back to SelectorSystem: $reason")
+          System.err.println(s"[cats-effect-ffm] falling back to SelectorSystem: $reason")
         SelectorSystem()
     }
 
-  /** The FFM polling system for this platform, or why there is none. Never throws. */
+  /**
+   * The FFM polling system for this platform, or why there is none. Never throws.
+   */
   def select(): Either[Unavailable, PollingSystem] =
     availability.flatMap { _ =>
       try Right(FfmEpollSystem())
@@ -63,7 +65,9 @@ object FfmPollingSystem {
       }
     }
 
-  /** Whether this JVM and platform can run an FFM polling system, and if not why. */
+  /**
+   * Whether this JVM and platform can run an FFM polling system, and if not why.
+   */
   lazy val availability: Either[Unavailable, Unit] = {
     val os = System.getProperty("os.name", "")
     val arch = System.getProperty("os.arch", "")
@@ -78,15 +82,15 @@ object FfmPollingSystem {
       Left(Unavailable(s"unsupported architecture $arch"))
     else if (!nativeAccessEnabled)
       Left(
-        Unavailable(
-          "native access is not enabled for this module; run with " +
-            "--enable-native-access=ALL-UNNAMED (or the module's name)"))
+        Unavailable("native access is not enabled for this module; run with " +
+          "--enable-native-access=ALL-UNNAMED (or the module's name)"))
     else
       try {
         // forces linking of every binding; fails fast on a missing symbol
         val cap = internal.Libc.capture()
         val fd = internal.Epoll.epollCreate1(cap, internal.Epoll.EPOLL_CLOEXEC)
-        if (fd < 0) Left(Unavailable(s"epoll_create1 failed: errno ${internal.Libc.errno(cap)}"))
+        if (fd < 0)
+          Left(Unavailable(s"epoll_create1 failed: errno ${internal.Libc.errno(cap)}"))
         else {
           internal.Libc.close(cap, fd)
           Right(())
@@ -97,8 +101,8 @@ object FfmPollingSystem {
   }
 
   /**
-   * `Module.isNativeAccessEnabled` (JDK 22+). On JDK 22-23 restricted methods are allowed with a
-   * warning even when this is false, but we treat it as a requirement so behaviour does not
+   * `Module.isNativeAccessEnabled` (JDK 22+). On JDK 22-23 restricted methods are allowed with
+   * a warning even when this is false, but we treat it as a requirement so behaviour does not
    * change silently on newer JDKs.
    */
   private def nativeAccessEnabled: Boolean =

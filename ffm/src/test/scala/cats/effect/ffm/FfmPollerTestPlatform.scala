@@ -23,7 +23,9 @@ import cats.effect.unsafe.{EpollPollingSystem, EpollSyscalls, PollerTestPlatform
 import java.io.IOException
 import java.lang.foreign.{Arena, MemorySegment, ValueLayout}
 
-/** [[PollerTestPlatform]] over FFM. */
+/**
+ * [[PollerTestPlatform]] over FFM.
+ */
 trait FfmPollerTestPlatform extends PollerTestPlatform {
 
   def epollSupported: Boolean = Libc.IS_LINUX
@@ -82,7 +84,9 @@ trait FfmPollerTestPlatform extends PollerTestPlatform {
   }
 }
 
-class FfmEpollPollerSuite extends cats.effect.unsafe.EpollPollerContract with FfmPollerTestPlatform
+class FfmEpollPollerSuite
+    extends cats.effect.unsafe.EpollPollerContract
+    with FfmPollerTestPlatform
 
 class FfmFileDescriptorPollerSuite
     extends cats.effect.unsafe.FileDescriptorPollerContract

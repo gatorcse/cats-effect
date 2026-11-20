@@ -1000,7 +1000,8 @@ lazy val core = crossProject(JSPlatform, JVMPlatform, NativePlatform)
         "cats.effect.unsafe.EpollSystem$epoll$immediate"),
       ProblemFilters.exclude[MissingClassProblem](
         "cats.effect.unsafe.EpollSystem$epoll$immediate$"),
-      ProblemFilters.exclude[MissingClassProblem]("cats.effect.unsafe.EpollSystem$epollImplicits"),
+      ProblemFilters.exclude[MissingClassProblem](
+        "cats.effect.unsafe.EpollSystem$epollImplicits"),
       ProblemFilters.exclude[MissingClassProblem](
         "cats.effect.unsafe.EpollSystem$epollImplicits$"),
       ProblemFilters.exclude[MissingClassProblem](
@@ -1274,8 +1275,8 @@ lazy val graalVMExample = project
   )
 
 /**
- * Experimental Foreign Function & Memory (Panama) polling systems. JVM-only, JDK 22+. Not part of
- * the aggregate so the default build keeps working on older JDKs; build it explicitly with
+ * Experimental Foreign Function & Memory (Panama) polling systems. JVM-only, JDK 22+. Not part
+ * of the aggregate so the default build keeps working on older JDKs; build it explicitly with
  * `ffm/compile` on JDK 22+.
  */
 lazy val ffm = project
@@ -1316,7 +1317,8 @@ lazy val ffmBenchmarks = project
   .enablePlugins(NoPublishPlugin, JmhPlugin)
 
 /**
- * Scala Native echo server for the shared echo harness in ffm-benchmarks/loadgen. Not aggregated.
+ * Scala Native echo server for the shared echo harness in ffm-benchmarks/loadgen. Not
+ * aggregated.
  */
 lazy val nativeBenchmarks = project
   .in(file("native-benchmarks"))

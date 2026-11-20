@@ -34,11 +34,11 @@ import java.util.concurrent.TimeUnit
  *
  *   - `abs*`: a libc function that makes no syscall, isolating the transition cost.
  *   - `getppid*`: the cheapest real syscall.
- *   - `epollWaitNow*` / `selectNow`: a non-blocking poll of an empty epoll set (what a worker does
- *     between fibers) via FFM vs `java.nio.channels.Selector`.
+ *   - `epollWaitNow*` / `selectNow`: a non-blocking poll of an empty epoll set (what a worker
+ *     does between fibers) via FFM vs `java.nio.channels.Selector`.
  *   - `readEmpty*`: a read that fails with EAGAIN (an empty non-blocking pipe).
- *   - `roundTrip*`: write `size` bytes into a pipe and read them back, from native memory, from a
- *     heap `byte[]` via a critical heap-access downcall, and through NIO with direct and heap
+ *   - `roundTrip*`: write `size` bytes into a pipe and read them back, from native memory, from
+ *     a heap `byte[]` via a critical heap-access downcall, and through NIO with direct and heap
  *     buffers (NIO copies heap buffers through a temporary direct buffer).
  */
 @State(Scope.Thread)
@@ -133,13 +133,17 @@ class DowncallBenchmark {
     Libc.readCE(cap, rfd, native, size.toLong)
   }
 
-  /** Heap `byte[]` passed straight to the kernel: no copy, no direct buffer. */
+  /**
+   * Heap `byte[]` passed straight to the kernel: no copy, no direct buffer.
+   */
   @Benchmark def roundTripFfmHeapCritical(): Long = {
     Libc.writeCHE(cap, wfd, heapSeg, size.toLong)
     Libc.readCHE(cap, rfd, heapSeg, size.toLong)
   }
 
-  /** Heap `byte[]` the portable way: copy through native memory both directions. */
+  /**
+   * Heap `byte[]` the portable way: copy through native memory both directions.
+   */
   @Benchmark def roundTripFfmHeapCopy(): Long = {
     MemorySegment.copy(heapSeg, 0L, native, 0L, size.toLong)
     Libc.writeCE(cap, wfd, native, size.toLong)

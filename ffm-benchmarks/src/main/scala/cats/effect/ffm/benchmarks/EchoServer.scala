@@ -119,14 +119,12 @@ object EchoServer extends IOApp.Simple {
                 if (ch ne null) IO.pure(ch)
                 else selector.select(server, SelectionKey.OP_ACCEPT) >> accept
               }
-            accept
-              .flatMap { ch =>
-                IO {
-                  ch.configureBlocking(false)
-                  ch.setOption(StandardSocketOptions.TCP_NODELAY, java.lang.Boolean.TRUE)
-                } >> sup.supervise(nioConn(selector, ch, heap).guarantee(IO(ch.close())))
-              }
-              .foreverM
+            accept.flatMap { ch =>
+              IO {
+                ch.configureBlocking(false)
+                ch.setOption(StandardSocketOptions.TCP_NODELAY, java.lang.Boolean.TRUE)
+              } >> sup.supervise(nioConn(selector, ch, heap).guarantee(IO(ch.close())))
+            }.foreverM
           }
       }
     }

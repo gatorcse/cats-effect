@@ -17,8 +17,8 @@
 package cats.effect
 
 /**
- * A [[FileDescriptorPollHandle]] from an edge-triggered poller, with an extra,
- * lower-level readiness protocol for callers that already guarantee a single reader.
+ * A [[FileDescriptorPollHandle]] from an edge-triggered poller, with an extra, lower-level
+ * readiness protocol for callers that already guarantee a single reader.
  *
  * With edge-triggered polling, a read that returns fewer bytes than requested means the
  * descriptor is drained. Such a caller can then skip the read that would fail with `EAGAIN` and
@@ -35,10 +35,14 @@ package cats.effect
  */
 trait EdgeTriggeredPollHandle extends FileDescriptorPollHandle {
 
-  /** The number of read-ready notifications delivered so far. */
+  /**
+   * The number of read-ready notifications delivered so far.
+   */
   def readReadyCount: Int
 
-  /** The number of write-ready notifications delivered so far. */
+  /**
+   * The number of write-ready notifications delivered so far.
+   */
   def writeReadyCount: Int
 
   /**
@@ -47,6 +51,8 @@ trait EdgeTriggeredPollHandle extends FileDescriptorPollHandle {
    */
   def awaitReadReady(seen: Int): IO[Int]
 
-  /** As [[awaitReadReady]] for write readiness. */
+  /**
+   * As [[awaitReadReady]] for write readiness.
+   */
   def awaitWriteReady(seen: Int): IO[Int]
 }

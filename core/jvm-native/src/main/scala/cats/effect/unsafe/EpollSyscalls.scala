@@ -31,16 +31,24 @@ package unsafe
  */
 private[effect] trait EpollSyscalls {
 
-  /** `epoll_create1(EPOLL_CLOEXEC)`; throws `IOException` on failure. */
+  /**
+   * `epoll_create1(EPOLL_CLOEXEC)`; throws `IOException` on failure.
+   */
   def epollCreate(): Int
 
-  /** A non-blocking, close-on-exec `eventfd`; throws `IOException` on failure. */
+  /**
+   * A non-blocking, close-on-exec `eventfd`; throws `IOException` on failure.
+   */
   def eventfdCreate(): Int
 
-  /** `epoll_ctl(ADD)`; returns 0 or the errno. */
+  /**
+   * `epoll_ctl(ADD)`; returns 0 or the errno.
+   */
   def epollAdd(epfd: Int, fd: Int, events: Int, data: Long): Int
 
-  /** `epoll_ctl(DEL)`; errors are ignored. Any thread. */
+  /**
+   * `epoll_ctl(DEL)`; errors are ignored. Any thread.
+   */
   def epollDel(epfd: Int, fd: Int): Unit
 
   /**
@@ -49,27 +57,39 @@ private[effect] trait EpollSyscalls {
    */
   def epollWait(epfd: Int, nanos: Long): Int
 
-  /** The flags of ready event `i` from the last [[epollWait]]. */
+  /**
+   * The flags of ready event `i` from the last [[epollWait]].
+   */
   def eventFlags(i: Int): Int
 
-  /** The `epoll_data` of ready event `i` from the last [[epollWait]]. */
+  /**
+   * The `epoll_data` of ready event `i` from the last [[epollWait]].
+   */
   def eventData(i: Int): Long
 
   def maxEvents: Int
 
-  /** Adds 1 to an eventfd. Any thread. */
+  /**
+   * Adds 1 to an eventfd. Any thread.
+   */
   def eventfdSignal(fd: Int): Unit
 
-  /** Resets an eventfd to 0. */
+  /**
+   * Resets an eventfd to 0.
+   */
   def eventfdDrain(fd: Int): Unit
 
   def close(fd: Int): Unit
 
-  /** Frees this instance's native memory. Called once, last. */
+  /**
+   * Frees this instance's native memory. Called once, last.
+   */
   def release(): Unit
 }
 
-/** Linux epoll ABI constants, identical on every architecture. */
+/**
+ * Linux epoll ABI constants, identical on every architecture.
+ */
 private[effect] object EpollConstants {
   final val EPOLLIN = 0x001
   final val EPOLLOUT = 0x004

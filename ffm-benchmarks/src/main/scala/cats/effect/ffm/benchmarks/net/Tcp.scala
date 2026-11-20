@@ -31,7 +31,9 @@ import java.lang.foreign.{Arena, MemorySegment, ValueLayout}
  */
 object Tcp {
 
-  /** Per-thread errno capture segment. Leaked per thread; fine for a spike. */
+  /**
+   * Per-thread errno capture segment. Leaked per thread; fine for a spike.
+   */
   private[this] val captureTL: ThreadLocal[MemorySegment] =
     ThreadLocal.withInitial(() => Libc.allocateCapture(Arena.global()))
 
@@ -39,53 +41,63 @@ object Tcp {
 
   final val ScratchSize = 16384
 
-  /** Per-thread native scratch buffer for reads that are copied onto the heap. */
+  /**
+   * Per-thread native scratch buffer for reads that are copied onto the heap.
+   */
   private[this] val scratchTL: ThreadLocal[MemorySegment] =
     ThreadLocal.withInitial(() => Arena.global().allocate(ScratchSize.toLong, 64L))
 
   @inline private[net] def scratch(): MemorySegment = scratchTL.get()
 
-  /** Opens a non-blocking listening socket on 0.0.0.0:port. */
+  /**
+   * Opens a non-blocking listening socket on 0.0.0.0:port.
+   */
   def listen(port: Int, backlog: Int = 4096): Resource[IO, ServerSocket] =
-    Resource.make(IO {
-      val fd = Libc.socket(Libc.AF_INET, Libc.SOCK_STREAM | Libc.SOCK_NONBLOCK | Libc.SOCK_CLOEXEC, 0)
-      if (fd < 0) throw new IOException("socket failed")
-      val arena = Arena.ofConfined()
-      try {
-        val one = arena.allocate(ValueLayout.JAVA_INT)
-        one.set(ValueLayout.JAVA_INT, 0L, 1)
-        Libc.setsockopt(fd, Libc.SOL_SOCKET, Libc.SO_REUSEADDR, one, 4)
-        val addr = arena.allocate(Libc.SOCKADDR_IN)
-        addr.set(ValueLayout.JAVA_SHORT, 0L, Libc.AF_INET.toShort)
-        addr.set(ValueLayout.JAVA_SHORT, 2L, java.lang.Short.reverseBytes(port.toShort))
-        addr.set(ValueLayout.JAVA_INT, 4L, 0) // INADDR_ANY
-        if (Libc.bind(fd, addr, Libc.SOCKADDR_IN.byteSize().toInt) != 0)
-          throw new IOException(s"bind($port) failed")
-        if (Libc.listen(fd, backlog) != 0) throw new IOException("listen failed")
-      } finally arena.close()
-      fd
-    })(fd => IO { Libc.close(fd); () }).flatMap { fd =>
-      Resource.eval(FileDescriptorPoller.get).flatMap { poller =>
-        poller.registerFileDescriptor(fd, true, false).map(h => new ServerSocket(fd, h))
+    Resource
+      .make(IO {
+        val fd = Libc
+          .socket(Libc.AF_INET, Libc.SOCK_STREAM | Libc.SOCK_NONBLOCK | Libc.SOCK_CLOEXEC, 0)
+        if (fd < 0) throw new IOException("socket failed")
+        val arena = Arena.ofConfined()
+        try {
+          val one = arena.allocate(ValueLayout.JAVA_INT)
+          one.set(ValueLayout.JAVA_INT, 0L, 1)
+          Libc.setsockopt(fd, Libc.SOL_SOCKET, Libc.SO_REUSEADDR, one, 4)
+          val addr = arena.allocate(Libc.SOCKADDR_IN)
+          addr.set(ValueLayout.JAVA_SHORT, 0L, Libc.AF_INET.toShort)
+          addr.set(ValueLayout.JAVA_SHORT, 2L, java.lang.Short.reverseBytes(port.toShort))
+          addr.set(ValueLayout.JAVA_INT, 4L, 0) // INADDR_ANY
+          if (Libc.bind(fd, addr, Libc.SOCKADDR_IN.byteSize().toInt) != 0)
+            throw new IOException(s"bind($port) failed")
+          if (Libc.listen(fd, backlog) != 0) throw new IOException("listen failed")
+        } finally arena.close()
+        fd
+      })(fd => IO { Libc.close(fd); () })
+      .flatMap { fd =>
+        Resource.eval(FileDescriptorPoller.get).flatMap { poller =>
+          poller.registerFileDescriptor(fd, true, false).map(h => new ServerSocket(fd, h))
+        }
       }
-    }
 
   final class ServerSocket private[Tcp] (val fd: Int, handle: FileDescriptorPollHandle) {
 
-    /** Accepts one connection, returning its registered socket. */
+    /**
+     * Accepts one connection, returning its registered socket.
+     */
     def accept: Resource[IO, Socket] =
       Resource
-        .makeFull[IO, Int](poll => poll(handle.pollReadRec(()) { _ =>
-          IO {
-            val cfd = Libc.accept4(capture(), fd, Libc.SOCK_NONBLOCK | Libc.SOCK_CLOEXEC)
-            if (cfd >= 0) Right(cfd)
-            else {
-              val err = Libc.errno(capture())
-              if (err == Libc.EAGAIN) Left(())
-              else throw new IOException(s"accept4 failed: errno $err")
+        .makeFull[IO, Int](poll =>
+          poll(handle.pollReadRec(()) { _ =>
+            IO {
+              val cfd = Libc.accept4(capture(), fd, Libc.SOCK_NONBLOCK | Libc.SOCK_CLOEXEC)
+              if (cfd >= 0) Right(cfd)
+              else {
+                val err = Libc.errno(capture())
+                if (err == Libc.EAGAIN) Left(())
+                else throw new IOException(s"accept4 failed: errno $err")
+              }
             }
-          }
-        }))(cfd => IO { Libc.close(cfd); () })
+          }))(cfd => IO { Libc.close(cfd); () })
         .flatMap { cfd =>
           Resource.eval(IO(setNoDelay(cfd))) >>
             Resource.eval(FileDescriptorPoller.get).flatMap { poller =>
@@ -105,18 +117,21 @@ object Tcp {
   }
 
   /**
-   * Spike knob: when a read returns fewer bytes than requested the socket is drained, so the next
-   * read waits for a new edge instead of first trying (and failing with `EAGAIN`). Disable with
-   * `-Dcats.effect.ffm.shortReadHint=false`.
+   * Spike knob: when a read returns fewer bytes than requested the socket is drained, so the
+   * next read waits for a new edge instead of first trying (and failing with `EAGAIN`). Disable
+   * with `-Dcats.effect.ffm.shortReadHint=false`.
    */
   private val shortReadHint: Boolean =
     !"false".equals(System.getProperty("cats.effect.ffm.shortReadHint"))
 
   final class Socket private[Tcp] (val fd: Int, handle0: FileDescriptorPollHandle) {
 
-    private[this] val handle: EdgeTriggeredPollHandle = handle0.asInstanceOf[EdgeTriggeredPollHandle]
+    private[this] val handle: EdgeTriggeredPollHandle =
+      handle0.asInstanceOf[EdgeTriggeredPollHandle]
 
-    /** Read-ready count observed just before a short read; -1 if not known to be drained. */
+    /**
+     * Read-ready count observed just before a short read; -1 if not known to be drained.
+     */
     @volatile private[this] var drainedAt: Int = -1
 
     /**
@@ -166,9 +181,7 @@ object Tcp {
             Array.emptyByteArray
           } else throw new IOException(s"read failed: errno $err")
         }
-      }.flatMap { a =>
-        if ((a ne null) && a.length == 0) readArrayHinted(max) else IO.pure(a)
-      }
+      }.flatMap { a => if ((a ne null) && a.length == 0) readArrayHinted(max) else IO.pure(a) }
     }
 
     /**
@@ -222,7 +235,9 @@ object Tcp {
         }
       }
 
-    /** Writes all `len` bytes of `buf`, suspending while the socket is not writable. */
+    /**
+     * Writes all `len` bytes of `buf`, suspending while the socket is not writable.
+     */
     def writeAll(buf: MemorySegment, len: Long): IO[Unit] =
       handle.pollWriteRec(0L) { off =>
         IO {
