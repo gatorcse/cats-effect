@@ -14,7 +14,6 @@
  * limitations under the License.
  */
 
-
 package cats.effect.ffm.benchmarks;
 
 import java.lang.management.GarbageCollectorMXBean;

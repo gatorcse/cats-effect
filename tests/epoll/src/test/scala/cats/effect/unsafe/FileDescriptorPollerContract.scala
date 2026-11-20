@@ -173,7 +173,7 @@ abstract class FileDescriptorPollerContract extends FunSuite with PollerTestPlat
     registeredPipe.use { pipe =>
       val buf = new Array[Byte](1)
       for {
-        _ <- pipe.read(buf, 0, 1).timeoutTo(50.millis, IO.unit) // canceled while waiting
+        _ <- pipe.read(buf, 0, 1).void.timeoutTo(50.millis, IO.unit) // canceled while waiting
         _ <- IO(writeUnsafe(pipe.writeFd, Array[Byte](7)))
         n <- pipe.read(buf, 0, 1)
       } yield {

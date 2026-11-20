@@ -14,7 +14,6 @@
  * limitations under the License.
  */
 
-
 package cats.effect.ffm.internal
 
 import cats.effect.unsafe.EpollSyscalls
