@@ -14,13 +14,8 @@
  * limitations under the License.
  */
 
-
 package cats.effect
-package ffm
-
-import cats.effect.ffm.internal.{FfmEpollSyscalls, Libc}
-import cats.effect.unsafe.EpollEventLoop
-import cats.effect.unsafe.PollResult
+package unsafe
 
 import munit.FunSuite
 
@@ -29,60 +24,50 @@ import java.util.concurrent.atomic.AtomicReference
 
 import scala.concurrent.duration._
 
-import Fds._
-
 /**
- * Contract tests that drive one poller directly, without a runtime, so that event batches,
- * wake-ups and timeouts can be observed exactly. Each case names the Netty issue it guards.
+ * Contract tests that drive one epoll poller directly, without a runtime, so that event batches,
+ * wake-ups and timeouts can be observed exactly. Each case names the Netty issue it guards. The
+ * same cases run on the JVM (FFM) and on Scala Native (`@extern`).
  */
-class EpollPollerSuite extends FunSuite {
+abstract class EpollPollerContract extends FunSuite with PollerTestPlatform {
+
+  override def munitIgnore: Boolean = !epollSupported
 
   def withPoller[A](maxEvents: Int = 64, nanos: Boolean = true)(
       f: EpollEventLoop.Poller => A): A = {
-    val poller = new EpollEventLoop.Poller(
-      new FfmEpollSyscalls(maxEvents, nanos && FfmEpollSystem.epollPwait2Available))
+    val poller = newPoller(maxEvents, nanos && epollPwait2Available)
     try f(poller)
     finally poller.close()
   }
 
+  def newPoller(maxEvents: Int = 64, nanos: Boolean = false): EpollEventLoop.Poller =
+    new EpollEventLoop.Poller(makeSyscalls(maxEvents, nanos))
+
   def register(p: EpollEventLoop.Poller, fd: Int, reads: Boolean, writes: Boolean) =
     p.register(fd, reads, writes).fold(throw _, identity)
 
-  /** Runs `poll` on another thread and returns (result, elapsed nanos). */
-  def pollOnThread(p: EpollEventLoop.Poller, nanos: Long): (Thread, AtomicReference[(PollResult, Long)], CountDownLatch) = {
+  /** Runs `poll` on another thread; the reference holds (result, elapsed nanos). */
+  def pollOnThread(p: EpollEventLoop.Poller, nanos: Long)
+      : (AtomicReference[(PollResult, Long)], CountDownLatch) = {
     val result = new AtomicReference[(PollResult, Long)]
     val done = new CountDownLatch(1)
-    val t = new Thread(() => {
-      val start = System.nanoTime()
-      val r = p.poll(nanos)
-      result.set((r, System.nanoTime() - start))
-      done.countDown()
+    val t = new Thread(new Runnable {
+      def run(): Unit = {
+        val start = System.nanoTime()
+        val r = p.poll(nanos)
+        result.set((r, System.nanoTime() - start))
+        done.countDown()
+      }
     })
     t.start()
-    (t, result, done)
+    (result, done)
   }
 
-  test("binding layout: epoll_event matches the platform ABI") {
-    import cats.effect.ffm.internal.Epoll
-    if (Libc.IS_X86_64) {
-      assertEquals(Epoll.EPOLL_EVENT_SIZE, 12L)
-      assertEquals(Epoll.EPOLL_EVENT_DATA_OFFSET, 4L)
-    } else {
-      assertEquals(Epoll.EPOLL_EVENT_SIZE, 16L)
-      assertEquals(Epoll.EPOLL_EVENT_DATA_OFFSET, 8L)
-    }
-    assertEquals(Epoll.TIMESPEC.byteSize(), 16L)
-  }
-
-  test("binding: errno is captured") {
-    val cap = Libc.capture()
-    assertEquals(Libc.close(cap, -1), -1)
-    assertEquals(Libc.errno(cap), Libc.EBADF)
-  }
+  def thread(body: => Unit): Thread = new Thread(new Runnable { def run(): Unit = body })
 
   test("an event for a ready fd is delivered once (edge-triggered)") {
     withPoller() { p =>
-      val (r, w) = pipeUnsafe()
+      val (r, w) = pipe()
       try {
         val h = register(p, r, reads = true, writes = false)
         writeUnsafe(w, Array[Byte](1))
@@ -97,7 +82,7 @@ class EpollPollerSuite extends FunSuite {
   test("N interrupts between polls cause exactly one eventfd write (netty#9191)") {
     withPoller() { p =>
       val before = p.wakeupWriteCount
-      val threads = (1 to 8).map(_ => new Thread(() => (1 to 100).foreach(_ => p.interrupt())))
+      val threads = (1 to 8).map(_ => thread((1 to 100).foreach(_ => p.interrupt())))
       threads.foreach(_.start())
       threads.foreach(_.join())
       assertEquals(p.wakeupWriteCount - before, 1L)
@@ -113,7 +98,7 @@ class EpollPollerSuite extends FunSuite {
 
   test("an interrupt wakes a parked poll") {
     withPoller() { p =>
-      val (_, result, done) = pollOnThread(p, -1)
+      val (result, done) = pollOnThread(p, -1)
       Thread.sleep(50)
       assertEquals(done.getCount, 1L)
       p.interrupt()
@@ -123,7 +108,7 @@ class EpollPollerSuite extends FunSuite {
   }
 
   test("the owner thread never wakes itself") {
-    val system = FfmEpollSystem()
+    val system = epollSystem()
     val p = system.makePoller()
     try {
       val before = p.wakeupWriteCount
@@ -132,17 +117,17 @@ class EpollPollerSuite extends FunSuite {
     } finally system.closePoller(p)
   }
 
-  test("interrupts racing closePoller never fail or write after close (netty#16836, #9586)") {
+  test("interrupts racing close never fail or write after close (netty#16836, #9586)") {
     (1 to 50).foreach { _ =>
-      val p = new EpollEventLoop.Poller(new FfmEpollSyscalls(64, false))
+      val p = newPoller()
       val start = new CountDownLatch(1)
-      @volatile var failure: Throwable = null
+      val failure = new AtomicReference[Throwable]
       val threads = (1 to 4).map { _ =>
-        new Thread(() => {
+        thread {
           start.await()
           try { (1 to 200).foreach(_ => p.interrupt()) }
-          catch { case t: Throwable => failure = t }
-        })
+          catch { case t: Throwable => failure.set(t) }
+        }
       }
       threads.foreach(_.start())
       start.countDown()
@@ -152,7 +137,7 @@ class EpollPollerSuite extends FunSuite {
       p.interrupt()
       assertEquals(p.wakeupWriteCount, after, "interrupt wrote after close")
       assert(p.isClosed)
-      if (failure ne null) throw failure
+      if (failure.get() ne null) throw failure.get()
     }
   }
 
@@ -169,21 +154,23 @@ class EpollPollerSuite extends FunSuite {
       }
     }
 
-  for (nanos <- List(true, false); timeout <- List(30L * 24 * 3600 * 1000000000L, Long.MaxValue))
-    test(s"very long timeouts do not overflow (netty#18213, #13503), nanos=$nanos, $timeout") {
-      withPoller(nanos = nanos) { p =>
-        val (_, result, done) = pollOnThread(p, timeout)
-        Thread.sleep(50)
-        assertEquals(done.getCount, 1L, s"returned early: ${result.get()}")
-        p.interrupt()
-        assert(done.await(5, TimeUnit.SECONDS), "not woken")
-        assertEquals(result.get()._1, PollResult.Complete)
-      }
+  for {
+    nanos <- List(true, false)
+    timeout <- List(30L * 24 * 3600 * 1000000000L, Long.MaxValue)
+  } test(s"very long timeouts do not overflow (netty#18213, #13503), nanos=$nanos, $timeout") {
+    withPoller(nanos = nanos) { p =>
+      val (result, done) = pollOnThread(p, timeout)
+      Thread.sleep(50)
+      assertEquals(done.getCount, 1L, s"returned early: ${result.get()}")
+      p.interrupt()
+      assert(done.await(5, TimeUnit.SECONDS), "not woken")
+      assertEquals(result.get()._1, PollResult.Complete)
     }
+  }
 
   test("an event for a registration removed mid-batch is dropped (netty#15279)") {
     withPoller() { p =>
-      val (r, w) = pipeUnsafe()
+      val (r, w) = pipe()
       try {
         val h = register(p, r, reads = true, writes = false)
         writeUnsafe(w, Array[Byte](1))
@@ -197,7 +184,7 @@ class EpollPollerSuite extends FunSuite {
 
   test("a reused fd and slot never reach the old handle (netty#15150)") {
     withPoller() { p =>
-      val (r1, w1) = pipeUnsafe()
+      val (r1, w1) = pipe()
       val h1 = register(p, r1, reads = true, writes = false)
       writeUnsafe(w1, Array[Byte](1))
       assertEquals(p.poll(0), PollResult.Complete)
@@ -205,7 +192,7 @@ class EpollPollerSuite extends FunSuite {
       close(r1); close(w1)
       p.processReadyEvents() // reclaims h1's slot
 
-      val (r2, w2) = pipeUnsafe() // very likely the same fd numbers
+      val (r2, w2) = pipe() // very likely the same fd numbers
       try {
         val h2 = register(p, r2, reads = true, writes = false)
         assertEquals(h2.slot, h1.slot, "expected the slot to be reused")
@@ -221,7 +208,7 @@ class EpollPollerSuite extends FunSuite {
 
   test("more ready fds than maxEvents are drained over Incomplete polls") {
     withPoller(maxEvents = 4) { p =>
-      val pipes = (1 to 10).map(_ => pipeUnsafe())
+      val pipes = (1 to 10).map(_ => pipe())
       try {
         val hs = pipes.map { case (r, _) => register(p, r, reads = true, writes = false) }
         pipes.foreach { case (_, w) => writeUnsafe(w, Array[Byte](1)) }
@@ -232,7 +219,9 @@ class EpollPollerSuite extends FunSuite {
           p.processReadyEvents()
           r = if (r eq PollResult.Incomplete) p.poll(0) else PollResult.Interrupted
         }
-        assertEquals(results.reverse, List(PollResult.Incomplete, PollResult.Incomplete, PollResult.Complete))
+        assertEquals(
+          results.reverse,
+          List(PollResult.Incomplete, PollResult.Incomplete, PollResult.Complete))
         assert(hs.forall(_.readReadyCount == 1))
       } finally pipes.foreach { case (r, w) => close(r); close(w) }
     }
@@ -240,9 +229,7 @@ class EpollPollerSuite extends FunSuite {
 
   test("an unconnected socket does not cause an EPOLLHUP storm (netty#16250)") {
     withPoller() { p =>
-      val cap = Libc.capture()
-      val fd = Libc.socket(cap, Libc.AF_INET, Libc.SOCK_STREAM | Libc.SOCK_NONBLOCK, 0)
-      assert(fd >= 0)
+      val fd = unconnectedTcpSocket()
       try {
         register(p, fd, reads = true, writes = true)
         var events = 0
@@ -255,8 +242,8 @@ class EpollPollerSuite extends FunSuite {
   }
 
   test("deregistering after the poller closed is harmless") {
-    val p = new EpollEventLoop.Poller(new FfmEpollSyscalls(64, false))
-    val (r, w) = pipeUnsafe()
+    val p = newPoller()
+    val (r, w) = pipe()
     try {
       val h = register(p, r, reads = true, writes = false)
       p.close()
@@ -268,23 +255,22 @@ class EpollPollerSuite extends FunSuite {
   test("metrics: submitted, succeeded and canceled waits") {
     import cats.effect.unsafe.implicits.global
     withPoller() { p =>
-      val (r, w) = pipeUnsafe()
+      val (r, w) = pipe()
       try {
         val h = register(p, r, reads = true, writes = false)
         // a wait that is canceled
-        val canceled = h.awaitReadReady(0).start.flatMap(f => IO.sleep(20.millis) *> f.cancel)
-        canceled.unsafeRunSync()
+        h.awaitReadReady(0).start.flatMap(f => IO.sleep(20.millis) *> f.cancel).unsafeRunSync()
         assertEquals(p.totalReadOperationsSubmittedCount(), 1L)
         assertEquals(p.totalReadOperationsCanceledCount(), 1L)
         assertEquals(p.readOperationsOutstandingCount(), 0)
         // a wait that succeeds
-        val fiber = h.awaitReadReady(0).unsafeToFuture()
+        val waiting = h.awaitReadReady(0).unsafeToFuture()
         Thread.sleep(20)
         assertEquals(p.readOperationsOutstandingCount(), 1)
         writeUnsafe(w, Array[Byte](1))
         p.poll(0)
         p.processReadyEvents()
-        assertEquals(scala.concurrent.Await.result(fiber, 5.seconds), 1)
+        assertEquals(scala.concurrent.Await.result(waiting, 5.seconds), 1)
         assertEquals(p.totalReadOperationsSucceededCount(), 1L)
         assertEquals(p.readOperationsOutstandingCount(), 0)
       } finally { close(r); close(w) }

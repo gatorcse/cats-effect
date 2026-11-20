@@ -1035,6 +1035,8 @@ lazy val tests: CrossProject = crossProject(JSPlatform, JVMPlatform, NativePlatf
   )
   .nativeSettings(
     Compile / mainClass := Some("catseffect.examples.NativeRunner"),
+    // the poller contract shared with cats-effect-ffm
+    Test / unmanagedSourceDirectories += (LocalRootProject / baseDirectory).value / "tests" / "epoll" / "src" / "test" / "scala",
     nativeTestSettings
   )
 
@@ -1264,6 +1266,7 @@ lazy val ffm = project
     Compile / doc / sources := Nil,
     Test / fork := true,
     Test / javaOptions += "--enable-native-access=ALL-UNNAMED",
+    Test / unmanagedSourceDirectories += (LocalRootProject / baseDirectory).value / "tests" / "epoll" / "src" / "test" / "scala",
     libraryDependencies += "org.scalameta" %% "munit" % MUnitVersion % Test
   )
 

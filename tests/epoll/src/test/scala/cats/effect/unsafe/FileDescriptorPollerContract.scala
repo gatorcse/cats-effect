@@ -14,21 +14,64 @@
  * limitations under the License.
  */
 
-
 package cats.effect
-package ffm
+package unsafe
 
 import cats.effect.std.CountDownLatch
 import cats.syntax.all._
 
+import munit.FunSuite
+
+import scala.concurrent.Future
 import scala.concurrent.duration._
 
-import Fds._
+/**
+ * The `FileDescriptorPoller` contract, run on a real runtime. It runs against every backend the
+ * platform has: FFM epoll on the JVM, epoll on Linux Native, kqueue on macOS Native.
+ */
+abstract class FileDescriptorPollerContract extends FunSuite with PollerTestPlatform {
 
-/** Port of the Scala Native `FileDescriptorPollerSuite`, plus JVM-specific cases. */
-class FileDescriptorPollerSuite extends FfmRuntimeSuite {
+  private[this] var _runtime: IORuntime = _
+  implicit def runtime: IORuntime = _runtime
 
-  real("installs FfmEpollSystem's FileDescriptorPoller") {
+  override def beforeAll(): Unit = {
+    val builder = IORuntime.builder()
+    runtimePollingSystem.foreach(builder.setPollingSystem)
+    _runtime = builder.build()
+  }
+
+  override def afterAll(): Unit = _runtime.shutdown()
+
+  def real(name: String)(body: => IO[Any]): Unit =
+    test(name)(IO.defer(body).timeout(20.seconds).unsafeToFuture(): Future[Any])
+
+  final class Pipe(
+      val readFd: Int,
+      val writeFd: Int,
+      val readHandle: FileDescriptorPollHandle,
+      val writeHandle: FileDescriptorPollHandle) {
+
+    def read(buf: Array[Byte], off: Int, len: Int): IO[Int] =
+      readHandle.pollReadRec(())(_ => IO(tryRead(readFd, buf, off, len)))
+
+    def write(buf: Array[Byte], off: Int, len: Int): IO[Int] =
+      writeHandle.pollWriteRec(())(_ => IO(tryWrite(writeFd, buf, off, len)))
+  }
+
+  def pipeResource: Resource[IO, (Int, Int)] =
+    Resource.make(IO(pipe())) { case (r, w) => IO { close(r); close(w) } }
+
+  def registeredPipe: Resource[IO, Pipe] =
+    pipeResource.flatMap {
+      case (r, w) =>
+        Resource.eval(FileDescriptorPoller.get).flatMap { poller =>
+          (
+            poller.registerFileDescriptor(r, true, false),
+            poller.registerFileDescriptor(w, false, true)).mapN(new Pipe(r, w, _, _))
+        }
+    }
+
+  real("installs a FileDescriptorPoller") {
     FileDescriptorPoller.find.map(p => assert(p.isDefined))
   }
 
@@ -67,8 +110,8 @@ class FileDescriptorPollerSuite extends FfmRuntimeSuite {
     }
   }
 
-  real("pollReadRec reads until EPOLLHUP then terminates with EOF") {
-    pipe.use {
+  real("pollReadRec reads until hang-up then terminates with EOF") {
+    pipeResource.use {
       case (r, w) =>
         FileDescriptorPoller.get.flatMap(_.registerFileDescriptor(r, true, false).use { h =>
           for {
@@ -80,30 +123,34 @@ class FileDescriptorPollerSuite extends FfmRuntimeSuite {
                 case Right(_) => IO.unit
               }
             }
-            n <- reader.background.use(join => gate.get >> IO(close(w)) >> join.flatMap(_.embedNever))
+            n <- reader
+              .background
+              .use(join => gate.get >> IO(close(w)) >> join.flatMap(_.embedNever))
           } yield assertEquals(n, -1)
         })
     }
   }
 
-  real("EPOLLERR wakes a blocked writer (reader closed)") {
-    pipe.use {
+  real("a closed reader wakes a blocked writer") {
+    pipeResource.use {
       case (r, w) =>
         FileDescriptorPoller.get.flatMap(_.registerFileDescriptor(w, false, true).use { h =>
           val chunk = new Array[Byte](65536)
           // fill the pipe until EAGAIN
           IO { while (tryWrite(w, chunk, 0, chunk.length).isRight) () } >>
-            Deferred[IO, Unit].flatMap { blocked =>
-              val writer = h.pollWriteRec(()) { _ =>
-                IO(tryWrite(w, chunk, 0, chunk.length)).flatTap {
-                  case Left(_) => blocked.complete(()).void
-                  case Right(_) => IO.unit
+            Deferred[IO, Unit]
+              .flatMap { blocked =>
+                val writer = h.pollWriteRec(()) { _ =>
+                  IO(tryWrite(w, chunk, 0, chunk.length)).flatTap {
+                    case Left(_) => blocked.complete(()).void
+                    case Right(_) => IO.unit
+                  }
+                }
+                writer.attempt.background.use { join =>
+                  blocked.get >> IO(close(r)) >> join.flatMap(_.embedNever)
                 }
               }
-              writer.attempt.background.use { join =>
-                blocked.get >> IO(close(r)) >> join.flatMap(_.embedNever)
-              }
-            }.map(res => assert(res.isLeft, s"expected EPIPE, got $res"))
+              .map(res => assert(res.isLeft, s"expected EPIPE, got $res"))
         })
     }
   }
@@ -111,9 +158,7 @@ class FileDescriptorPollerSuite extends FfmRuntimeSuite {
   real("concurrent writers on one handle are serialized") {
     registeredPipe.use { pipe =>
       val n = 200
-      val writers = (0 until n).toList.parTraverse_ { i =>
-        pipe.write(Array(i.toByte), 0, 1)
-      }
+      val writers = (0 until n).toList.parTraverse_ { i => pipe.write(Array(i.toByte), 0, 1) }
       val readAll = {
         val buf = new Array[Byte](n)
         def go(off: Int): IO[Unit] =
