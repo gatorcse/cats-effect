@@ -16,10 +16,8 @@
 
 
 package cats.effect
-package ffm
-package internal
+package unsafe
 
-import cats.effect.unsafe.PollResult
 import cats.effect.unsafe.metrics.PollerMetrics
 
 import java.io.IOException
@@ -29,11 +27,11 @@ import java.util.concurrent.atomic.{AtomicBoolean, AtomicInteger, AtomicLong}
 import EpollConstants._
 
 /**
- * The epoll event loop: handle table, wake-ups, lifecycle and event dispatch. It calls the OS
- * only through [[EpollSyscalls]] and imports nothing from `java.lang.foreign`, so it can move to
- * shared `jvm-native` code if the Scala Native `EpollSystem` adopts it.
+ * The epoll event loop shared by the JVM (`cats-effect-ffm`'s `FfmEpollSystem`) and Scala Native
+ * (`EpollSystem`): handle table, wake-ups, lifecycle and event dispatch. It calls the OS only
+ * through [[EpollSyscalls]].
  */
-private[ffm] object EpollEventLoop {
+private[effect] object EpollEventLoop {
 
   /** `epoll_data` of the poller's own wake-up eventfd. Never a valid handle id. */
   private final val WakeupId = -1L
@@ -48,17 +46,17 @@ private[ffm] object EpollEventLoop {
       val id: Long,
       reads: Boolean,
       writes: Boolean
-  ) extends FfmPollHandle {
+  ) extends EdgeTriggeredPollHandle {
 
-    @volatile private[ffm] var deregistered: Boolean = false
+    @volatile private[effect] var deregistered: Boolean = false
 
     @volatile private[this] var readReadyCounter = 0
     @volatile private[this] var readCallback: Either[Throwable, Int] => Unit = null
     @volatile private[this] var writeReadyCounter = 0
     @volatile private[this] var writeCallback: Either[Throwable, Int] => Unit = null
 
-    private[this] val readLock = new HandleLock
-    private[this] val writeLock = new HandleLock
+    private[this] val readLock = new PollHandleLock
+    private[this] val writeLock = new PollHandleLock
 
     def readReadyCount: Int = readReadyCounter
     def writeReadyCount: Int = writeReadyCounter
@@ -157,7 +155,7 @@ private[ffm] object EpollEventLoop {
         IO(writeReadyCounter).flatMap(go(a, _))
       }
 
-    private[ffm] def deregister(): Unit = poller.deregister(this)
+    private[effect] def deregister(): Unit = poller.deregister(this)
   }
 
   private final val ReadWake = EPOLLIN | EPOLLRDHUP | EPOLLHUP | EPOLLERR
@@ -167,7 +165,7 @@ private[ffm] object EpollEventLoop {
   /** Generations use 31 bits so that no id is ever [[WakeupId]]. */
   private final val GenerationMask = 0x7fffffff
 
-  final class Poller private[ffm] (sys: EpollSyscalls)
+  class Poller private[effect] (sys: EpollSyscalls)
       extends PollerMetrics {
 
     private[this] val maxEvents = sys.maxEvents
@@ -206,9 +204,9 @@ private[ffm] object EpollEventLoop {
       }
     }
 
-    private[ffm] def close(): Unit = {
+    private[effect] def close(): Unit = {
       if (inFlight.getAndAdd(Int.MinValue) >= 0) {
-        while (inFlight.get() != Int.MinValue) Thread.onSpinWait()
+        while (inFlight.get() != Int.MinValue) Thread.`yield`()
         sys.close(wakeFd)
         sys.close(epfd)
         sys.release()
@@ -222,14 +220,14 @@ private[ffm] object EpollEventLoop {
     private[this] val wakeupPending = new AtomicBoolean(false)
     private[this] val wakeupWrites = new AtomicLong(0L)
 
-    private[ffm] def interrupt(): Unit =
+    private[effect] def interrupt(): Unit =
       if (!wakeupPending.get() && wakeupPending.compareAndSet(false, true)) whileOpen {
         wakeupWrites.incrementAndGet()
         sys.eventfdSignal(wakeFd)
       }
 
     /** Number of eventfd writes so far; for tests of wake-up debouncing. */
-    private[ffm] def wakeupWriteCount: Long = wakeupWrites.get()
+    private[effect] def wakeupWriteCount: Long = wakeupWrites.get()
 
     // --- handle table (owner thread only, except pendingFree) ---------------------------------
 
@@ -272,7 +270,7 @@ private[ffm] object EpollEventLoop {
         s
       }
 
-    private[ffm] def register(
+    private[effect] def register(
         fd: Int,
         reads: Boolean,
         writes: Boolean): Either[Throwable, PollHandle] = {
@@ -295,7 +293,7 @@ private[ffm] object EpollEventLoop {
       }
     }
 
-    private[ffm] def deregister(handle: PollHandle): Unit =
+    private[effect] def deregister(handle: PollHandle): Unit =
       if (!handle.deregistered) {
         handle.deregistered = true
         registered.decrementAndGet()
@@ -309,7 +307,7 @@ private[ffm] object EpollEventLoop {
 
     // --- polling -------------------------------------------------------------------------------
 
-    private[ffm] def poll(nanos: Long): PollResult = {
+    private[effect] def poll(nanos: Long): PollResult = {
       val rtn = sys.epollWait(epfd, nanos)
 
       // any return ends this park; the next interrupt must write again
@@ -327,7 +325,7 @@ private[ffm] object EpollEventLoop {
       }
     }
 
-    private[ffm] def processReadyEvents(): Boolean = {
+    private[effect] def processReadyEvents(): Boolean = {
       var fibersRescheduled = false
       var i = 0
       while (i < readyEventCount) {
@@ -354,19 +352,19 @@ private[ffm] object EpollEventLoop {
       fibersRescheduled
     }
 
-    private[ffm] def needsPoll(): Boolean = registered.get() > 0
+    private[effect] def needsPoll(): Boolean = registered.get() > 0
 
     /** Number of live registrations. */
     def registrationCount: Int = registered.get()
 
     // --- metrics ------------------------------------------------------------------------------
 
-    private[ffm] val readSubmitted = new AtomicLong(0L)
-    private[ffm] val readSucceeded = new AtomicLong(0L)
-    private[ffm] val readCanceled = new AtomicLong(0L)
-    private[ffm] val writeSubmitted = new AtomicLong(0L)
-    private[ffm] val writeSucceeded = new AtomicLong(0L)
-    private[ffm] val writeCanceled = new AtomicLong(0L)
+    private[effect] val readSubmitted = new AtomicLong(0L)
+    private[effect] val readSucceeded = new AtomicLong(0L)
+    private[effect] val readCanceled = new AtomicLong(0L)
+    private[effect] val writeSubmitted = new AtomicLong(0L)
+    private[effect] val writeSucceeded = new AtomicLong(0L)
+    private[effect] val writeCanceled = new AtomicLong(0L)
 
     def readOperationsOutstandingCount(): Int =
       (readSubmitted.get() - readSucceeded.get() - readCanceled.get()).toInt
@@ -404,6 +402,6 @@ private[ffm] object EpollEventLoop {
     def totalConnectOperationsErroredCount(): Long = 0L
     def totalConnectOperationsCanceledCount(): Long = 0L
 
-    override def toString: String = "FfmEpoll"
+    override def toString: String = "Epoll"
   }
 }

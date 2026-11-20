@@ -14,14 +14,11 @@
  * limitations under the License.
  */
 
-
 package cats.effect
 package ffm
 
-import cats.effect.ffm.internal.{EpollEventLoop, FfmEpollSyscalls}
-import cats.effect.unsafe.{PollResult, PollingContext, PollingSystem}
-import cats.effect.unsafe.metrics.PollerMetrics
-
+import cats.effect.ffm.internal.FfmEpollSyscalls
+import cats.effect.unsafe.{EpollEventLoop, EpollPollingSystem}
 
 /**
  * A [[cats.effect.unsafe.PollingSystem PollingSystem]] for Linux backed by `epoll`, called
@@ -32,7 +29,8 @@ import cats.effect.unsafe.metrics.PollerMetrics
  * Usually obtained through [[FfmPollingSystem]], which falls back to `SelectorSystem` when FFM
  * or epoll is unavailable.
  *
- * Design, relative to the Scala Native `EpollSystem` it is ported from:
+ * The event loop itself (`EpollEventLoop`) is shared with the Scala Native `EpollSystem`; this
+ * class only supplies the FFM syscalls. Design:
  *
  *   - Registrations are edge-triggered. Readiness is published to each handle as a counter, so
  *     a fiber that races a notification never misses it.
@@ -47,48 +45,15 @@ import cats.effect.unsafe.metrics.PollerMetrics
  *   - Each handle direction is serialized by a lightweight lock instead of `std.Mutex`.
  */
 final class FfmEpollSystem private (maxEvents: Int, nanosecondTimeouts: Boolean)
-    extends PollingSystem {
+    extends EpollPollingSystem {
 
-  type Api = FileDescriptorPoller
   type Poller = EpollEventLoop.Poller
-
-  def close(): Unit = ()
-
-  def makeApi(ctx: PollingContext[Poller]): Api = new FileDescriptorPollerImpl(ctx)
 
   def makePoller(): Poller =
     new EpollEventLoop.Poller(new FfmEpollSyscalls(maxEvents, nanosecondTimeouts))
 
-  def closePoller(poller: Poller): Unit = poller.close()
-
-  def poll(poller: Poller, nanos: Long): PollResult = poller.poll(nanos)
-
-  def processReadyEvents(poller: Poller): Boolean = poller.processReadyEvents()
-
-  def needsPoll(poller: Poller): Boolean = poller.needsPoll()
-
-  def interrupt(targetThread: Thread, targetPoller: Poller): Unit =
-    if (Thread.currentThread() ne targetThread) targetPoller.interrupt()
-
-  def metrics(poller: Poller): PollerMetrics = poller
-
   override def toString: String =
     s"FfmEpollSystem(maxEvents = $maxEvents, nanosecondTimeouts = $nanosecondTimeouts)"
-
-  private final class FileDescriptorPollerImpl(ctx: PollingContext[Poller])
-      extends FileDescriptorPoller {
-
-    def registerFileDescriptor(
-        fd: Int,
-        reads: Boolean,
-        writes: Boolean
-    ): Resource[IO, FileDescriptorPollHandle] =
-      Resource.make {
-        IO.async_[EpollEventLoop.PollHandle] { cb =>
-          ctx.accessPoller(poller => cb(poller.register(fd, reads, writes)))
-        }
-      }(handle => IO(handle.deregister()))
-  }
 }
 
 object FfmEpollSystem {

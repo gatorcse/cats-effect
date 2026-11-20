@@ -16,10 +16,9 @@
 
 
 package cats.effect
-package ffm
 
 /**
- * A [[cats.effect.FileDescriptorPollHandle FileDescriptorPollHandle]] with an extra,
+ * A [[FileDescriptorPollHandle]] from an edge-triggered poller, with an extra,
  * lower-level readiness protocol for callers that already guarantee a single reader.
  *
  * With edge-triggered polling, a read that returns fewer bytes than requested means the
@@ -35,7 +34,7 @@ package ffm
  *
  * Phase 0 measured this at one fewer syscall per message. The counters only ever increase.
  */
-trait FfmPollHandle extends FileDescriptorPollHandle {
+trait EdgeTriggeredPollHandle extends FileDescriptorPollHandle {
 
   /** The number of read-ready notifications delivered so far. */
   def readReadyCount: Int

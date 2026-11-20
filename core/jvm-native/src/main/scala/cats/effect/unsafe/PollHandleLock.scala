@@ -16,8 +16,7 @@
 
 
 package cats.effect
-package ffm
-package internal
+package unsafe
 
 import java.util.concurrent.atomic.AtomicReference
 
@@ -30,8 +29,8 @@ import scala.annotation.tailrec
  * allocation beyond the bracketing `IO` nodes. Phase 0 measured `Mutex[IO]` at 15-25% of the
  * per-message cost of an echo server.
  */
-private[ffm] final class HandleLock {
-  import HandleLock._
+private[effect] final class PollHandleLock {
+  import PollHandleLock._
 
   private[this] val state = new AtomicReference[State](Free)
 
@@ -82,7 +81,7 @@ private[ffm] final class HandleLock {
     if (s eq Held) {
       if (!state.compareAndSet(s, Free)) release()
     } else if (s eq Free) {
-      throw new IllegalStateException("HandleLock released while free")
+      throw new IllegalStateException("PollHandleLock released while free")
     } else {
       val head = s.waiters.head
       val rest = s.waiters.tail
@@ -93,7 +92,7 @@ private[ffm] final class HandleLock {
   }
 }
 
-private[ffm] object HandleLock {
+private[effect] object PollHandleLock {
   private val RightUnit: Either[Throwable, Unit] = Right(())
 
   private final class Waiter(val cb: Either[Throwable, Unit] => Unit)

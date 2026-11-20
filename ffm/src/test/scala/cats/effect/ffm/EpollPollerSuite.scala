@@ -18,7 +18,8 @@
 package cats.effect
 package ffm
 
-import cats.effect.ffm.internal.{EpollEventLoop, FfmEpollSyscalls, Libc}
+import cats.effect.ffm.internal.{FfmEpollSyscalls, Libc}
+import cats.effect.unsafe.EpollEventLoop
 import cats.effect.unsafe.PollResult
 
 import munit.FunSuite

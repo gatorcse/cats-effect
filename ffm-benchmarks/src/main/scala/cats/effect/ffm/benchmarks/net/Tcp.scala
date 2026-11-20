@@ -19,7 +19,7 @@ package cats.effect.ffm.benchmarks
 package net
 
 import cats.effect.{FileDescriptorPollHandle, FileDescriptorPoller, IO, Resource}
-import cats.effect.ffm.FfmPollHandle
+import cats.effect.EdgeTriggeredPollHandle
 import cats.effect.ffm.benchmarks.{BenchLibc => Libc}
 import cats.syntax.all._
 
@@ -115,7 +115,7 @@ object Tcp {
 
   final class Socket private[Tcp] (val fd: Int, handle0: FileDescriptorPollHandle) {
 
-    private[this] val handle: FfmPollHandle = handle0.asInstanceOf[FfmPollHandle]
+    private[this] val handle: EdgeTriggeredPollHandle = handle0.asInstanceOf[EdgeTriggeredPollHandle]
 
     /** Read-ready count observed just before a short read; -1 if not known to be drained. */
     @volatile private[this] var drainedAt: Int = -1

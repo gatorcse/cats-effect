@@ -15,21 +15,22 @@
  */
 
 
-package cats.effect.ffm.internal
+package cats.effect
+package unsafe
 
 /**
  * Everything the epoll event loop needs from the OS, and nothing else.
  *
- * The event loop ([[EpollEventLoop]]) is written only against this interface so that it can move
- * to shared `jvm-native` code later, with an FFM implementation on the JVM
- * ([[FfmEpollSyscalls]]) and an `@extern` one on Scala Native. It deals only in ints and longs:
- * no `MemorySegment`, no `Ptr`.
+ * The event loop ([[EpollEventLoop]]) is shared by the JVM and Scala Native and is written only
+ * against this interface: the `cats-effect-ffm` module implements it with FFM downcalls and the
+ * Native runtime with `@extern` calls. It deals only in ints and longs: no `MemorySegment`, no
+ * `Ptr`.
  *
  * One instance belongs to one poller and owns that poller's native memory (event array,
  * timespec, errno scratch). Methods marked "any thread" may be called concurrently with the
  * owner; all others are called only by the thread that currently owns the poller.
  */
-private[ffm] trait EpollSyscalls {
+private[effect] trait EpollSyscalls {
 
   /** `epoll_create1(EPOLL_CLOEXEC)`; throws `IOException` on failure. */
   def epollCreate(): Int
@@ -70,7 +71,7 @@ private[ffm] trait EpollSyscalls {
 }
 
 /** Linux epoll ABI constants, identical on every architecture. */
-private[ffm] object EpollConstants {
+private[effect] object EpollConstants {
   final val EPOLLIN = 0x001
   final val EPOLLOUT = 0x004
   final val EPOLLERR = 0x008

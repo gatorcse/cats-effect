@@ -17,6 +17,8 @@
 
 package cats.effect.ffm.internal
 
+import cats.effect.unsafe.EpollSyscalls
+
 import java.io.IOException
 import java.lang.foreign.{Arena, MemorySegment, ValueLayout}
 
