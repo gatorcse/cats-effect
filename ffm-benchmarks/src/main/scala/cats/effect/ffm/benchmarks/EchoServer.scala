@@ -26,7 +26,7 @@ import cats.effect.unsafe.{PollingSystem, SelectorSystem}
 import java.lang.foreign.{Arena, MemorySegment}
 import java.net.InetSocketAddress
 import java.nio.ByteBuffer
-import java.nio.channels.{SelectionKey, ServerSocketChannel, SocketChannel}
+import java.nio.channels.{SelectionKey, SocketChannel}
 import java.net.StandardSocketOptions
 
 /**
