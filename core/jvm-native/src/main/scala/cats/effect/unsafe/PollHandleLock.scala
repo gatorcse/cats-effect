@@ -17,9 +17,9 @@
 package cats.effect
 package unsafe
 
-import java.util.concurrent.atomic.AtomicReference
-
 import scala.annotation.tailrec
+
+import java.util.concurrent.atomic.AtomicReference
 
 /**
  * A minimal asynchronous, FIFO, cancelation-safe lock for one poll handle direction.

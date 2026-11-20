@@ -17,12 +17,12 @@
 package cats.effect
 package unsafe
 
-import munit.FunSuite
+import scala.concurrent.duration._
 
 import java.util.concurrent.{CountDownLatch, TimeUnit}
 import java.util.concurrent.atomic.AtomicReference
 
-import scala.concurrent.duration._
+import munit.FunSuite
 
 /**
  * Contract tests that drive one epoll poller directly, without a runtime, so that event

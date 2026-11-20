@@ -20,10 +20,10 @@ package unsafe
 import cats.effect.std.CountDownLatch
 import cats.syntax.all._
 
-import munit.FunSuite
-
 import scala.concurrent.Future
 import scala.concurrent.duration._
+
+import munit.FunSuite
 
 /**
  * The `FileDescriptorPoller` contract, run on a real runtime. It runs against every backend the
