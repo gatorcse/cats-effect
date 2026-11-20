@@ -47,7 +47,7 @@ def proc_counters(pid):
 
 def server_pid(port):
     for _ in range(100):
-        out = subprocess.run(["pgrep", "-f", f"(echo.port={port}|cecho {port}|tokio-echo {port})"],
+        out = subprocess.run(["pgrep", "-f", f"(echo.port={port}|cecho {port}|tokio-echo {port}|native-echo {port})"],
                              capture_output=True, text=True).stdout.split()
         if out:
             return int(out[-1])

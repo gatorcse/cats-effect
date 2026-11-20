@@ -1,4 +1,4 @@
-# FFM polling spike: phase 0 benchmarks
+# FFM and Native polling benchmarks
 
 Everything here is a spike to decide go/no-go on a Panama (FFM) polling system for cats-effect.
 Linux x86_64/aarch64 only, JDK 22+ (tested on Temurin 25.0.1).
@@ -20,13 +20,14 @@ Linux x86_64/aarch64 only, JDK 22+ (tested on Temurin 25.0.1).
 
 Neither project is in the root aggregate, so the default build still works on JDK 8 to 21.
 
-## Spike knobs
+## Backends
 
-- `-Dcats.effect.ffm.handleMutex=true|false`: wrap `pollReadRec`/`pollWriteRec` in a `Mutex`
-  per handle, as Scala Native does (default true; the echo harness turns it off unless the
-  backend name has `+mutex`).
-- `-Dcats.effect.ffm.shortReadHint=true|false`: treat a short read as "drained" and wait for the
-  next edge rather than issuing a read that will fail with `EAGAIN` (default true).
+- JVM (`cats.effect.ffm.benchmarks.EchoServer`): `ffm-native`, `ffm-heap`, `nio`, `nio-heap`.
+  Add `+nohint` to an `ffm-*` backend to go through the generic locked `pollReadRec` instead of
+  the "short read means drained" fast path.
+- Scala Native (`native-benchmarks/`, binary copied to `/opt/tools/native-echo`): `native`,
+  `native-heap`, `native-nohint`. Same shared epoll loop as the JVM, through `@extern`.
+- References: `cecho` (plain C epoll) and `tokio` (2 worker threads).
 
 ## Running
 
@@ -39,9 +40,11 @@ gcc -O2 -pthread -o /opt/tools/echoload ffm-benchmarks/loadgen/echoload.c
 gcc -O2 -pthread -o /opt/tools/cecho ffm-benchmarks/loadgen/cecho.c
 (cd ffm-benchmarks/tokio-echo && cargo build --release)
 sbt "++2.13; export ffmBenchmarks/Runtime/fullClasspath"   # -> /opt/tools/ffm.cp
+sbt "++2.13; nativeBenchmarks/nativeLink" && \
+  cp native-benchmarks/target/scala-2.13/cats-effect-native-benchmarks /opt/tools/native-echo
 # in the fs2 fork: sbt "++2.13; export benchmark/Runtime/fullClasspath"  # -> /opt/tools/fs2.cp
 WARMUP=10 DURATION=15 ffm-benchmarks/loadgen/bench.py \
-  cecho,tokio,fs2,nio,nio-heap,ffm-native,ffm-heap,ffm-native+mutex,ffm-native+nohint \
+  cecho,tokio,fs2,nio,nio-heap,ffm-native,ffm-heap,ffm-native+nohint,native,native-heap,native-nohint \
   c1-64B,c64-64B,c1024-64B,c64-16K
 ```
 

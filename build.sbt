@@ -1290,6 +1290,22 @@ lazy val ffmBenchmarks = project
   .enablePlugins(NoPublishPlugin, JmhPlugin)
 
 /**
+ * Scala Native echo server for the shared echo harness in ffm-benchmarks/loadgen. Not aggregated.
+ */
+lazy val nativeBenchmarks = project
+  .in(file("native-benchmarks"))
+  .dependsOn(core.native)
+  .enablePlugins(ScalaNativePlugin, NoPublishPlugin)
+  .settings(
+    name := "cats-effect-native-benchmarks",
+    crossScalaVersions := Seq(Scala212, Scala213, Scala3),
+    Compile / mainClass := Some("cats.effect.benchmarks.echo.EchoServer"),
+    nativeConfig ~= { c =>
+      c.withMode(Mode.releaseFast).withLTO(LTO.thin).withMultithreading(true)
+    }
+  )
+
+/**
  * JMH benchmarks for IO and other things.
  */
 lazy val benchmarks = project
