@@ -102,6 +102,7 @@ private[effect] object EpollEventLoop {
                 if (readCallback ne null) {
                   readCallback = null
                   poller.readCanceled.incrementAndGet()
+                  ()
                 }
                 ()
               }))
@@ -127,6 +128,7 @@ private[effect] object EpollEventLoop {
                 if (writeCallback ne null) {
                   writeCallback = null
                   poller.writeCanceled.incrementAndGet()
+                  ()
                 }
                 ()
               }))

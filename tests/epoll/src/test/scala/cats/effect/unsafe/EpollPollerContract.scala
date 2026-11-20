@@ -234,7 +234,7 @@ abstract class EpollPollerContract extends FunSuite with PollerTestPlatform {
         register(p, fd, reads = true, writes = true)
         var events = 0
         (1 to 20).foreach { _ =>
-          if (p.poll(0) ne PollResult.Interrupted) { events += 1; p.processReadyEvents() }
+          if (p.poll(0) ne PollResult.Interrupted) { events += 1; p.processReadyEvents(); () }
         }
         assert(events <= 1, s"$events polls returned events")
       } finally close(fd)
