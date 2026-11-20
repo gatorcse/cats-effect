@@ -323,9 +323,6 @@ private[effect] object EpollEventLoop {
     private[effect] def poll(nanos: Long): PollResult = {
       val rtn = sys.epollWait(epfd, nanos)
 
-      // any return ends this park; the next interrupt must write again
-      wakeupPending.set(false)
-
       if (rtn > 0) {
         readyEventCount = rtn
         if (rtn < maxEvents) PollResult.Complete else PollResult.Incomplete
@@ -345,7 +342,14 @@ private[effect] object EpollEventLoop {
         val flags = sys.eventFlags(i)
         val id = sys.eventData(i)
         if (id == WakeupId) {
+          // Drain first, then re-arm. The other order loses a wake-up: an interrupt between
+          // the reset and the drain writes, the drain eats its write, and the flag stays set,
+          // so every later interrupt is skipped while the owner parks. An interrupt that falls
+          // between the drain and the reset is skipped, which is fine: the owner is awake and
+          // looks for work before it parks again. The eventfd is edge-triggered, so a write
+          // that lands after this batch is reported by the next poll.
           sys.eventfdDrain(wakeFd)
+          wakeupPending.set(false)
         } else {
           val slot = id.toInt
           val generation = (id >>> 32).toInt

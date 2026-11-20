@@ -99,6 +99,22 @@ abstract class EpollPollerContract extends FunSuite with PollerTestPlatform {
     }
   }
 
+  test("an interrupt between a poll and its processing is never lost") {
+    withPoller() { p =>
+      p.interrupt()
+      assertEquals(p.poll(0), PollResult.Complete) // the wake-up is in this batch
+      p.interrupt() // races the owner: after the poll returned, before it processed
+      p.processReadyEvents()
+      // the owner parks again; a fresh interrupt must still reach it
+      val (result, done) = pollOnThread(p, -1)
+      Thread.sleep(50)
+      p.interrupt()
+      assert(done.await(5, TimeUnit.SECONDS), "wake-up lost: the debounce flag stayed set")
+      assertEquals(result.get()._1, PollResult.Complete)
+      p.processReadyEvents()
+    }
+  }
+
   test("an interrupt wakes a parked poll") {
     withPoller() { p =>
       val (result, done) = pollOnThread(p, -1)
