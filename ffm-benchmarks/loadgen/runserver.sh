@@ -10,8 +10,8 @@ case $b in
   fs2) exec taskset -c 0,1 $JVM -cp "$(cat /opt/tools/fs2.cp)" fs2.benchmark.echo.EchoServer ;;
   *)
     base=${b%%+*}
-    props="-Dcats.effect.ffm.handleMutex=false"
-    [[ $b == *+mutex* ]] && props="-Dcats.effect.ffm.handleMutex=true"
+    props=""
+    
     [[ $b == *+nohint* ]] && props="$props -Dcats.effect.ffm.shortReadHint=false"
     exec taskset -c 0,1 $JVM --enable-native-access=ALL-UNNAMED $props -Decho.backend=$base -cp "$(cat /opt/tools/ffm.cp)" cats.effect.ffm.benchmarks.EchoServer ;;
 esac

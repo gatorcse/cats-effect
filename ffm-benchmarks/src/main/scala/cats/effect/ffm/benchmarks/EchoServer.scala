@@ -19,7 +19,7 @@ package cats.effect
 package ffm
 package benchmarks
 
-import cats.effect.ffm.net.Tcp
+import cats.effect.ffm.benchmarks.net.Tcp
 import cats.effect.std.Supervisor
 import cats.effect.unsafe.{PollingSystem, SelectorSystem}
 
@@ -48,7 +48,7 @@ object EchoServer extends IOApp.Simple {
   private val BufSize = Integer.getInteger("echo.bufsize", 16384).intValue
 
   override protected def pollingSystem: PollingSystem =
-    if (backend.startsWith("ffm")) EpollSystem() else SelectorSystem()
+    if (backend.startsWith("ffm")) FfmEpollSystem() else SelectorSystem()
 
   def run: IO[Unit] =
     IO(AllocReporter.start()) >>

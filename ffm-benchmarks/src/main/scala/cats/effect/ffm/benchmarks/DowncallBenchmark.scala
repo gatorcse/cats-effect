@@ -17,7 +17,7 @@
 
 package cats.effect.ffm.benchmarks
 
-import cats.effect.ffm.internal.Libc
+import cats.effect.ffm.benchmarks.{BenchLibc => Libc}
 
 import org.openjdk.jmh.annotations._
 

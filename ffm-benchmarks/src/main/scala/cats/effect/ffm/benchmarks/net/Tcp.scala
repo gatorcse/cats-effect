@@ -15,18 +15,19 @@
  */
 
 
-package cats.effect
-package ffm
+package cats.effect.ffm.benchmarks
 package net
 
-import cats.effect.ffm.internal.Libc
+import cats.effect.{FileDescriptorPollHandle, FileDescriptorPoller, IO, Resource}
+import cats.effect.ffm.FfmPollHandle
+import cats.effect.ffm.benchmarks.{BenchLibc => Libc}
 import cats.syntax.all._
 
 import java.io.IOException
 import java.lang.foreign.{Arena, MemorySegment, ValueLayout}
 
 /**
- * Spike-quality, Linux-only TCP sockets on raw file descriptors, driven by [[EpollSystem]].
+ * Spike-quality, Linux-only TCP sockets on raw file descriptors, driven by `FfmEpollSystem`.
  * Enough to run an echo server for phase 0 benchmarks; not a public API proposal.
  */
 object Tcp {
@@ -112,7 +113,9 @@ object Tcp {
   private val shortReadHint: Boolean =
     !"false".equals(System.getProperty("cats.effect.ffm.shortReadHint"))
 
-  final class Socket private[Tcp] (val fd: Int, handle: FileDescriptorPollHandle) {
+  final class Socket private[Tcp] (val fd: Int, handle0: FileDescriptorPollHandle) {
+
+    private[this] val handle: FfmPollHandle = handle0.asInstanceOf[FfmPollHandle]
 
     /** Read-ready count observed just before a short read; -1 if not known to be drained. */
     @volatile private[this] var drainedAt: Int = -1

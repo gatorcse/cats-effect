@@ -1258,7 +1258,7 @@ lazy val ffm = project
   .dependsOn(core.jvm, std.jvm)
   .settings(
     name := "cats-effect-ffm",
-    crossScalaVersions := Seq(Scala213, Scala3),
+    crossScalaVersions := Seq(Scala212, Scala213, Scala3),
     tlJdkRelease := Some(22),
     mimaPreviousArtifacts := Set.empty,
     Compile / doc / sources := Nil,
@@ -1275,7 +1275,7 @@ lazy val ffmBenchmarks = project
   .dependsOn(ffm)
   .settings(
     name := "cats-effect-ffm-benchmarks",
-    crossScalaVersions := Seq(Scala213, Scala3),
+    crossScalaVersions := Seq(Scala212, Scala213, Scala3),
     tlJdkRelease := Some(22),
     fork := true,
     run / connectInput := false,
