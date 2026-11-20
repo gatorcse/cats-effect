@@ -34,7 +34,8 @@ import static java.lang.foreign.ValueLayout.JAVA_LONG;
 
 /**
  * Raw libc bindings shared by every FFM polling system, via the Foreign Function & Memory API
- * (JDK 22+).
+ * (JDK 25+, which accepts {@code critical} together with {@code captureCallState}; JDK 22
+ * rejects that combination).
  *
  * <p>This layer is written in Java on purpose: {@code MethodHandle.invokeExact} is
  * signature-polymorphic and Java guarantees the exact call-site type the JIT needs to inline the
@@ -108,47 +109,15 @@ public final class Libc {
     return LINKER.defaultLookup().find(name);
   }
 
-  /**
-   * Whether this JDK accepts {@code critical} together with {@code captureCallState}. JDK 22
-   * rejects the combination ("Incompatible linker options"); later JDKs accept it. Where it is
-   * rejected, the bindings drop {@code critical} (a thread-state transition per call), and the
-   * {@code Heap} variants copy through a native buffer.
-   */
-  public static final boolean CRITICAL_WITH_CAPTURE = probeCriticalWithCapture();
-
-  private static boolean probeCriticalWithCapture() {
-    // lets tests exercise the JDK 22 path on a newer JDK
-    if ("false".equals(System.getProperty("cats.effect.ffm.criticalWithCapture"))) return false;
-    MemorySegment addr = find("close").orElseThrow();
-    try {
-      LINKER.downcallHandle(
-          addr, FunctionDescriptor.of(JAVA_INT, JAVA_INT), CRITICAL_HEAP, CAPTURE);
-      return true;
-    } catch (IllegalArgumentException e) {
-      return false;
-    }
-  }
-
-  private static Linker.Option[] supported(Linker.Option[] opts) {
-    if (CRITICAL_WITH_CAPTURE) return opts;
-    boolean capture = false;
-    for (Linker.Option o : opts) if (o == CAPTURE) capture = true;
-    if (!capture) return opts;
-    return java.util.Arrays.stream(opts)
-        .filter(o -> o != CRITICAL && o != CRITICAL_HEAP)
-        .toArray(Linker.Option[]::new);
-  }
-
   static MethodHandle bind(String name, FunctionDescriptor fd, Linker.Option... opts) {
     MemorySegment addr =
         find(name).orElseThrow(() -> new UnsatisfiedLinkError("libc symbol not found: " + name));
-    return LINKER.downcallHandle(addr, fd, supported(opts));
+    return LINKER.downcallHandle(addr, fd, opts);
   }
 
   static MethodHandle bindOptional(
       String name, FunctionDescriptor fd, Linker.Option... opts) {
-    Linker.Option[] o = supported(opts);
-    return find(name).map(addr -> LINKER.downcallHandle(addr, fd, o)).orElse(null);
+    return find(name).map(addr -> LINKER.downcallHandle(addr, fd, opts)).orElse(null);
   }
 
   /** Allocates a segment to receive captured call state. */
@@ -267,14 +236,6 @@ public final class Libc {
 
   /** Non-blocking read into a native or heap segment, with no copy. */
   public static long readHeap(MemorySegment cap, int fd, MemorySegment buf, long len) {
-    if (!CRITICAL_WITH_CAPTURE && !buf.isNative()) {
-      try (Arena arena = Arena.ofConfined()) {
-        MemorySegment tmp = arena.allocate(Math.max(len, 1L));
-        long n = read(cap, fd, tmp, len);
-        if (n > 0) MemorySegment.copy(tmp, 0L, buf, 0L, n);
-        return n;
-      }
-    }
     try {
       return (long) readHeap.invokeExact(cap, fd, buf, len);
     } catch (Throwable t) {
@@ -302,13 +263,6 @@ public final class Libc {
 
   /** Non-blocking write from a native or heap segment, with no copy. */
   public static long writeHeap(MemorySegment cap, int fd, MemorySegment buf, long len) {
-    if (!CRITICAL_WITH_CAPTURE && !buf.isNative()) {
-      try (Arena arena = Arena.ofConfined()) {
-        MemorySegment tmp = arena.allocate(Math.max(len, 1L));
-        MemorySegment.copy(buf, 0L, tmp, 0L, len);
-        return write(cap, fd, tmp, len);
-      }
-    }
     try {
       return (long) writeHeap.invokeExact(cap, fd, buf, len);
     } catch (Throwable t) {

@@ -31,8 +31,8 @@ import cats.effect.unsafe.{PollingSystem, SelectorSystem}
  * }}}
  *
  * The JVM needs native access for this module, e.g. `--enable-native-access=ALL-UNNAMED` (or
- * `Enable-Native-Access: ALL-UNNAMED` in an executable jar's manifest). Without it, JDK 22-23
- * work but warn and later JDKs may deny access, so it is detected up front.
+ * `Enable-Native-Access: ALL-UNNAMED` in an executable jar's manifest). Without it, current
+ * JDKs warn and later ones will deny access, so it is detected up front.
  */
 object FfmPollingSystem {
 
@@ -74,8 +74,9 @@ object FfmPollingSystem {
     val supportedArch = Set("amd64", "x86_64", "aarch64", "arm64")
     val feature = Runtime.version().feature()
 
-    if (feature < 22)
-      Left(Unavailable(s"JDK $feature; the FFM API needs JDK 22+"))
+    if (feature < 25)
+      Left(Unavailable(
+        s"JDK $feature; cats-effect-ffm needs JDK 25+ (critical downcalls with errno capture)"))
     else if (!os.toLowerCase.startsWith("linux"))
       Left(Unavailable(s"no FFM polling system for $os yet (epoll needs Linux)"))
     else if (!supportedArch(arch.toLowerCase))
@@ -101,9 +102,9 @@ object FfmPollingSystem {
   }
 
   /**
-   * `Module.isNativeAccessEnabled` (JDK 22+). On JDK 22-23 restricted methods are allowed with
-   * a warning even when this is false, but we treat it as a requirement so behaviour does not
-   * change silently on newer JDKs.
+   * `Module.isNativeAccessEnabled`. Restricted methods are still allowed with a warning when
+   * this is false, but we treat it as a requirement so behaviour does not change silently on
+   * newer JDKs.
    */
   private def nativeAccessEnabled: Boolean =
     try getClass.getModule.isNativeAccessEnabled()

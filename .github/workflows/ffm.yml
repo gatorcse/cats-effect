@@ -20,7 +20,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        java: ['22', '25']
+        java: ['25']
         scala: ['2.12.21', '2.13.18', '3.3.7']
     steps:
       - uses: actions/checkout@v6
@@ -33,7 +33,7 @@ jobs:
           cache: sbt
       - uses: sbt/setup-sbt@v1
       - name: Core MiMa (JVM)
-        if: matrix.java == '22'
+        if: matrix.java == '25'
         run: sbt ++${{ matrix.scala }} coreJVM/mimaReportBinaryIssues
       - name: FFM tests and benchmarks compile
         run: sbt ++${{ matrix.scala }} ffm/test ffmBenchmarks/compile

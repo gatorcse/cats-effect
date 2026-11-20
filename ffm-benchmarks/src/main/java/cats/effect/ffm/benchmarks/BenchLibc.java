@@ -32,7 +32,7 @@ import static java.lang.foreign.ValueLayout.JAVA_INT;
 import static java.lang.foreign.ValueLayout.JAVA_LONG;
 
 /**
- * Phase 0 spike bindings (benchmarks only) via the Foreign Function & Memory API (JDK 22+).
+ * Phase 0 spike bindings (benchmarks only) via the Foreign Function & Memory API (JDK 25+).
  *
  * <p>Every handle is a {@code static final} so the JIT can constant-fold it and inline the
  * downcall stub. Bindings come in up to three flavours:

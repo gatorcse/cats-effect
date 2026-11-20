@@ -1275,9 +1275,9 @@ lazy val graalVMExample = project
   )
 
 /**
- * Experimental Foreign Function & Memory (Panama) polling systems. JVM-only, JDK 22+. Not part
+ * Experimental Foreign Function & Memory (Panama) polling systems. JVM-only, JDK 25+. Not part
  * of the aggregate so the default build keeps working on older JDKs; build it explicitly with
- * `ffm/compile` on JDK 22+.
+ * `ffm/compile` on JDK 25+.
  */
 lazy val ffm = project
   .in(file("ffm"))
@@ -1285,7 +1285,7 @@ lazy val ffm = project
   .settings(
     name := "cats-effect-ffm",
     crossScalaVersions := Seq(Scala212, Scala213, Scala3),
-    tlJdkRelease := Some(22),
+    tlJdkRelease := Some(25),
     mimaPreviousArtifacts := Set.empty,
     Compile / doc / sources := Nil,
     Test / fork := true,
@@ -1306,7 +1306,7 @@ lazy val ffmBenchmarks = project
     name := "cats-effect-ffm-benchmarks",
     javacOptions += "-Xlint:-restricted",
     crossScalaVersions := Seq(Scala212, Scala213, Scala3),
-    tlJdkRelease := Some(22),
+    tlJdkRelease := Some(25),
     fork := true,
     run / connectInput := false,
     javaOptions ++= Seq(

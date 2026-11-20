@@ -22,7 +22,7 @@ import cats.effect.unsafe.{EpollEventLoop, EpollPollingSystem}
 
 /**
  * A [[cats.effect.unsafe.PollingSystem PollingSystem]] for Linux backed by `epoll`, called
- * directly through the Foreign Function & Memory API (JDK 22+). Its `Api` is the same
+ * directly through the Foreign Function & Memory API (JDK 25+). Its `Api` is the same
  * [[cats.effect.FileDescriptorPoller FileDescriptorPoller]] that the Scala Native runtime
  * provides, so fd-based code (e.g. fs2 sockets) can be shared between the two platforms.
  *

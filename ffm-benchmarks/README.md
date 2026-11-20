@@ -1,7 +1,7 @@
 # FFM and Native polling benchmarks
 
 Everything here is a spike to decide go/no-go on a Panama (FFM) polling system for cats-effect.
-Linux x86_64/aarch64 only, JDK 22+ (tested on Temurin 25.0.1).
+Linux x86_64/aarch64 only, JDK 25+ (tested on Temurin 25.0.1).
 
 ## Modules
 
