@@ -1249,6 +1249,44 @@ lazy val graalVMExample = project
   )
 
 /**
+ * Experimental Foreign Function & Memory (Panama) polling systems. JVM-only, JDK 22+. Not part of
+ * the aggregate so the default build keeps working on older JDKs; build it explicitly with
+ * `ffm/compile` on JDK 22+.
+ */
+lazy val ffm = project
+  .in(file("ffm"))
+  .dependsOn(core.jvm, std.jvm)
+  .settings(
+    name := "cats-effect-ffm",
+    crossScalaVersions := Seq(Scala213, Scala3),
+    tlJdkRelease := Some(22),
+    mimaPreviousArtifacts := Set.empty,
+    Compile / doc / sources := Nil,
+    Test / fork := true,
+    Test / javaOptions += "--enable-native-access=ALL-UNNAMED",
+    libraryDependencies += "org.scalameta" %% "munit" % MUnitVersion % Test
+  )
+
+/**
+ * Phase 0 benchmarks for the FFM polling spike: JMH downcall micro-benchmarks and echo servers.
+ */
+lazy val ffmBenchmarks = project
+  .in(file("ffm-benchmarks"))
+  .dependsOn(ffm)
+  .settings(
+    name := "cats-effect-ffm-benchmarks",
+    crossScalaVersions := Seq(Scala213, Scala3),
+    tlJdkRelease := Some(22),
+    fork := true,
+    run / connectInput := false,
+    javaOptions ++= Seq(
+      "--enable-native-access=ALL-UNNAMED",
+      "-Dcats.effect.tracing.mode=none",
+      "-Dcats.effect.tracing.exceptions.enhanced=false")
+  )
+  .enablePlugins(NoPublishPlugin, JmhPlugin)
+
+/**
  * JMH benchmarks for IO and other things.
  */
 lazy val benchmarks = project
