@@ -1289,6 +1289,8 @@ lazy val ffm = project
     Compile / doc / sources := Nil,
     Test / fork := true,
     Test / javaOptions += "--enable-native-access=ALL-UNNAMED",
+    // the FFM bindings are restricted methods by design; JDK 25 javac warns on every one
+    javacOptions += "-Xlint:-restricted",
     Test / unmanagedSourceDirectories += (LocalRootProject / baseDirectory).value / "tests" / "epoll" / "src" / "test" / "scala",
     libraryDependencies += "org.scalameta" %% "munit" % MUnitVersion % Test
   )
@@ -1301,6 +1303,7 @@ lazy val ffmBenchmarks = project
   .dependsOn(ffm)
   .settings(
     name := "cats-effect-ffm-benchmarks",
+    javacOptions += "-Xlint:-restricted",
     crossScalaVersions := Seq(Scala212, Scala213, Scala3),
     tlJdkRelease := Some(22),
     fork := true,
