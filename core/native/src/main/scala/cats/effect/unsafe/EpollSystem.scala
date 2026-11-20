@@ -29,6 +29,26 @@ object EpollSystem extends EpollPollingSystem {
   def makePoller(): Poller =
     new Poller(new NativeEpollSyscalls(MaxEvents, NativeEpollSyscalls.epollPwait2Available))
 
+  // Re-declared with this object's concrete `Poller` so that the erased signatures (and the
+  // static forwarders) stay binary compatible with the previous, standalone EpollSystem.
+
+  override def close(): Unit = super.close()
+
+  override def makeApi(ctx: PollingContext[Poller]): Api = super.makeApi(ctx)
+
+  override def closePoller(poller: Poller): Unit = super.closePoller(poller)
+
+  override def poll(poller: Poller, nanos: Long): PollResult = super.poll(poller, nanos)
+
+  override def processReadyEvents(poller: Poller): Boolean = super.processReadyEvents(poller)
+
+  override def needsPoll(poller: Poller): Boolean = super.needsPoll(poller)
+
+  override def interrupt(targetThread: Thread, targetPoller: Poller): Unit =
+    super.interrupt(targetThread, targetPoller)
+
+  override def metrics(poller: Poller): cats.effect.unsafe.metrics.PollerMetrics = super.metrics(poller)
+
   final class Poller private[EpollSystem] (sys: EpollSyscalls)
       extends EpollEventLoop.Poller(sys)
 }

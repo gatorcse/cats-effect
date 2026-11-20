@@ -985,7 +985,30 @@ lazy val core = crossProject(JSPlatform, JVMPlatform, NativePlatform)
       ProblemFilters.exclude[MissingClassProblem](
         "cats.effect.metrics.NativeCpuStarvationMetrics"),
       ProblemFilters.exclude[MissingClassProblem](
-        "cats.effect.metrics.NativeCpuStarvationMetrics$")
+        "cats.effect.metrics.NativeCpuStarvationMetrics$"),
+      // EpollSystem now runs on the shared EpollEventLoop; these were all private to it
+      ProblemFilters.exclude[MissingClassProblem](
+        "cats.effect.unsafe.EpollSystem$FileDescriptorPollerImpl"),
+      ProblemFilters.exclude[MissingClassProblem]("cats.effect.unsafe.EpollSystem$PollHandle"),
+      ProblemFilters.exclude[MissingClassProblem]("cats.effect.unsafe.EpollSystem$epoll"),
+      ProblemFilters.exclude[MissingClassProblem]("cats.effect.unsafe.EpollSystem$epoll$"),
+      ProblemFilters.exclude[MissingClassProblem](
+        "cats.effect.unsafe.EpollSystem$epoll$awaiting"),
+      ProblemFilters.exclude[MissingClassProblem](
+        "cats.effect.unsafe.EpollSystem$epoll$awaiting$"),
+      ProblemFilters.exclude[MissingClassProblem](
+        "cats.effect.unsafe.EpollSystem$epoll$immediate"),
+      ProblemFilters.exclude[MissingClassProblem](
+        "cats.effect.unsafe.EpollSystem$epoll$immediate$"),
+      ProblemFilters.exclude[MissingClassProblem]("cats.effect.unsafe.EpollSystem$epollImplicits"),
+      ProblemFilters.exclude[MissingClassProblem](
+        "cats.effect.unsafe.EpollSystem$epollImplicits$"),
+      ProblemFilters.exclude[MissingClassProblem](
+        "cats.effect.unsafe.EpollSystem$epollImplicits$epoll_eventOps"),
+      ProblemFilters.exclude[MissingClassProblem](
+        "cats.effect.unsafe.EpollSystem$epollImplicits$epoll_eventOps$"),
+      ProblemFilters.exclude[MissingClassProblem]("cats.effect.unsafe.EpollSystem$eventfd"),
+      ProblemFilters.exclude[MissingClassProblem]("cats.effect.unsafe.EpollSystem$eventfd$")
     )
   )
 
