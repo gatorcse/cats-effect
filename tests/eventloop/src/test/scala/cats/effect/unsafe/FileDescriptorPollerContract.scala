@@ -27,20 +27,23 @@ import munit.FunSuite
 
 /**
  * The `FileDescriptorPoller` contract, run on a real runtime. It runs against every backend the
- * platform has: FFM epoll on the JVM, epoll on Linux Native, kqueue on macOS Native.
+ * platform has: FFM epoll and kqueue on the JVM, epoll on Linux Native, kqueue on macOS Native.
  */
 abstract class FileDescriptorPollerContract extends FunSuite with PollerTestPlatform {
 
   private[this] var _runtime: IORuntime = _
   implicit def runtime: IORuntime = _runtime
 
-  override def beforeAll(): Unit = {
-    val builder = IORuntime.builder()
-    runtimePollingSystem.foreach(builder.setPollingSystem)
-    _runtime = builder.build()
-  }
+  override def munitIgnore: Boolean = !backendSupported
 
-  override def afterAll(): Unit = _runtime.shutdown()
+  override def beforeAll(): Unit =
+    if (backendSupported) {
+      val builder = IORuntime.builder()
+      runtimePollingSystem.foreach(builder.setPollingSystem)
+      _runtime = builder.build()
+    }
+
+  override def afterAll(): Unit = if (_runtime ne null) _runtime.shutdown()
 
   def real(name: String)(body: => IO[Any]): Unit =
     test(name)(IO.defer(body).timeout(20.seconds).unsafeToFuture(): Future[Any])
@@ -227,7 +230,7 @@ abstract class FileDescriptorPollerContract extends FunSuite with PollerTestPlat
 
   private def describe(pipe: Pipe): String = {
     def h(x: FileDescriptorPollHandle) = x match {
-      case e: EpollEventLoop.PollHandle =>
+      case e: EventLoop.PollHandle =>
         val p = e.poller
         s"ready=${e.readReadyCount}/${e.writeReadyCount} poller(regs=${p.registrationCount}, " +
           s"readsOutstanding=${p.readOperationsOutstandingCount()}, " +

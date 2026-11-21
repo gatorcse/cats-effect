@@ -12,7 +12,11 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifdef __linux__
 #include <sys/epoll.h>
+#else
+#include <sys/event.h>
+#endif
 #include <sys/socket.h>
 #include <time.h>
 #include <unistd.h>
@@ -44,6 +48,41 @@ static uint64_t now_ns(void) {
 
 static char *payload;
 
+/* readiness: epoll on Linux, kqueue on macOS/BSD */
+static int poller_create(void) {
+#ifdef __linux__
+  return epoll_create1(0);
+#else
+  return kqueue();
+#endif
+}
+
+static void poller_add(int ep, int fd, void *ptr) {
+#ifdef __linux__
+  struct epoll_event ev = {.events = EPOLLIN, .data.ptr = ptr};
+  epoll_ctl(ep, EPOLL_CTL_ADD, fd, &ev);
+#else
+  struct kevent ev;
+  EV_SET(&ev, fd, EVFILT_READ, EV_ADD, 0, 0, ptr);
+  kevent(ep, &ev, 1, NULL, 0, NULL);
+#endif
+}
+
+/* waits up to 100ms; fills ready[] with the registered pointers */
+static int poller_wait(int ep, void **ready, int max) {
+#ifdef __linux__
+  struct epoll_event evs[256];
+  int k = epoll_wait(ep, evs, max, 100);
+  for (int j = 0; j < k; j++) ready[j] = evs[j].data.ptr;
+#else
+  struct kevent evs[256];
+  struct timespec to = {0, 100000000};
+  int k = kevent(ep, NULL, 0, evs, max, &to);
+  for (int j = 0; j < k; j++) ready[j] = evs[j].udata;
+#endif
+  return k;
+}
+
 static void send_msg(conn_t *c) {
   int off = 0;
   c->sent_at = now_ns();
@@ -57,7 +96,7 @@ static void send_msg(conn_t *c) {
 
 static void *run(void *arg) {
   worker_t *w = arg;
-  int ep = epoll_create1(0);
+  int ep = poller_create();
   char *buf = malloc(65536);
   struct sockaddr_in a = {.sin_family = AF_INET, .sin_port = htons(port)};
   inet_pton(AF_INET, "127.0.0.1", &a.sin_addr);
@@ -68,15 +107,14 @@ static void *run(void *arg) {
     setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &one, sizeof one);
     fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) | O_NONBLOCK);
     w->conns[i].fd = fd;
-    struct epoll_event ev = {.events = EPOLLIN, .data.ptr = &w->conns[i]};
-    epoll_ctl(ep, EPOLL_CTL_ADD, fd, &ev);
+    poller_add(ep, fd, &w->conns[i]);
   }
   for (int i = 0; i < w->n; i++) send_msg(&w->conns[i]);
-  struct epoll_event evs[256];
+  void *ready[256];
   while (phase != 2) {
-    int k = epoll_wait(ep, evs, 256, 100);
+    int k = poller_wait(ep, ready, 256);
     for (int j = 0; j < k; j++) {
-      conn_t *c = evs[j].data.ptr;
+      conn_t *c = ready[j];
       ssize_t r = read(c->fd, buf, 65536);
       if (r <= 0) {
         if (r < 0 && (errno == EAGAIN || errno == EINTR)) continue;

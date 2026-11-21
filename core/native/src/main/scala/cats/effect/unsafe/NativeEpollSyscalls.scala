@@ -44,6 +44,11 @@ private[unsafe] final class NativeEpollSyscalls(val maxEvents: Int, nanosecondTi
   private[this] val drainBuf: Ptr[Long] =
     stdlib.calloc(1.toCSize, sizeof[Long]).asInstanceOf[Ptr[Long]]
 
+  if ((events eq null) || (timespec eq null) || (drainBuf eq null)) {
+    release() // free(NULL) is a no-op
+    throw new OutOfMemoryError("epoll event list")
+  }
+
   def epollCreate(): Int = {
     val fd = epoll.epoll_create1(EPOLL_CLOEXEC)
     if (fd < 0) throw errnoException("epoll_create1", errno)
@@ -95,11 +100,10 @@ private[unsafe] final class NativeEpollSyscalls(val maxEvents: Int, nanosecondTi
   def eventData(i: Int): Long =
     !(events + (i.toLong * EventSize + DataOffset)).asInstanceOf[Ptr[Long]]
 
-  def eventfdSignal(fd: Int): Unit = {
+  def eventfdSignal(fd: Int): Boolean = {
     val buf = stackalloc[Long]()
     !buf = 1L
-    unistd.write(fd, buf, 8.toCSize)
-    ()
+    unistd.write(fd, buf, 8.toCSize) == 8
   }
 
   def eventfdDrain(fd: Int): Unit = {

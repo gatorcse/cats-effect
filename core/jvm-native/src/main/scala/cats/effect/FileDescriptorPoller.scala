@@ -22,6 +22,10 @@ trait FileDescriptorPoller {
 
   /**
    * Registers a file descriptor with the poller and monitors read- and/or write-ready events.
+   *
+   * Release the resource before closing the file descriptor. Pollers track registrations by fd
+   * number, so a registration that outlives its fd can, depending on the backend, keep a new fd
+   * with the same number from being registered (kqueue) until it is released.
    */
   def registerFileDescriptor(
       fileDescriptor: Int,

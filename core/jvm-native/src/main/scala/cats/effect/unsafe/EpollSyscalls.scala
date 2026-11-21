@@ -70,9 +70,9 @@ private[effect] trait EpollSyscalls {
   def maxEvents: Int
 
   /**
-   * Adds 1 to an eventfd. Any thread.
+   * Adds 1 to an eventfd. Any thread. Returns false if the write failed.
    */
-  def eventfdSignal(fd: Int): Unit
+  def eventfdSignal(fd: Int): Boolean
 
   /**
    * Resets an eventfd to 0.

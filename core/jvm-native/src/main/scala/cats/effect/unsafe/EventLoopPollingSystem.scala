@@ -20,18 +20,18 @@ package unsafe
 import cats.effect.unsafe.metrics.PollerMetrics
 
 /**
- * The `PollingSystem` half of the shared epoll backend. Platform modules supply only the
- * syscalls, by implementing `makePoller`: the `cats-effect-ffm` module's `FfmEpollSystem` on
- * the JVM, and `EpollSystem` on Scala Native.
+ * The `PollingSystem` half of the shared [[EventLoop]]. Platform modules supply only the
+ * backend, by implementing `makePoller`: the `cats-effect-ffm` module's `FfmEpollSystem` and
+ * `FfmKqueueSystem` on the JVM, and `EpollSystem` on Scala Native.
  */
-abstract class EpollPollingSystem private[effect] () extends PollingSystem {
+abstract class EventLoopPollingSystem private[effect] () extends PollingSystem {
 
   type Api = FileDescriptorPoller
-  type Poller <: EpollEventLoop.Poller
+  type Poller <: EventLoop.Poller
 
   def close(): Unit = ()
 
-  def makeApi(ctx: PollingContext[Poller]): Api = new EpollPollingSystem.Api[Poller](ctx)
+  def makeApi(ctx: PollingContext[Poller]): Api = new EventLoopPollingSystem.Api[Poller](ctx)
 
   def closePoller(poller: Poller): Unit = poller.close()
 
@@ -47,9 +47,10 @@ abstract class EpollPollingSystem private[effect] () extends PollingSystem {
    * `notifyParked` scans every index, its own included. If it picks itself, it marks itself
    * awake and interrupts its own poller, then goes on to `poll(-1)`. Skipping that "self"
    * wake-up left it parked forever with nothing to wake it (its signal is already `Unparked`).
-   * The eventfd write stays readable, so the next poll returns at once; it is debounced, so a
-   * redundant one is cheap. (`LockSupport.unpark` and NIO's `Selector.wakeup` are sticky the
-   * same way.)
+   * The wake-up (an eventfd write, or an `EVFILT_USER` trigger on kqueue) stays pending, so the
+   * next poll returns at once with `Complete` and the worker takes the "polled" exit, which
+   * keeps the pool's counters balanced; it is debounced, so a redundant one is cheap.
+   * (`LockSupport.unpark` and NIO's `Selector.wakeup` are sticky the same way.)
    */
   def interrupt(targetThread: Thread, targetPoller: Poller): Unit =
     targetPoller.interrupt()
@@ -57,9 +58,9 @@ abstract class EpollPollingSystem private[effect] () extends PollingSystem {
   def metrics(poller: Poller): PollerMetrics = poller
 }
 
-private object EpollPollingSystem {
+private[unsafe] object EventLoopPollingSystem {
 
-  private final class Api[P <: EpollEventLoop.Poller](ctx: PollingContext[P])
+  private[unsafe] final class Api[P <: EventLoop.Poller](ctx: PollingContext[P])
       extends FileDescriptorPoller {
 
     def registerFileDescriptor(
@@ -68,7 +69,7 @@ private object EpollPollingSystem {
         writes: Boolean
     ): Resource[IO, FileDescriptorPollHandle] =
       Resource.make {
-        IO.async_[EpollEventLoop.PollHandle] { cb =>
+        IO.async_[EventLoop.PollHandle] { cb =>
           ctx.accessPoller(poller => cb(poller.register(fd, reads, writes)))
         }
       }(handle => IO(handle.deregister()))

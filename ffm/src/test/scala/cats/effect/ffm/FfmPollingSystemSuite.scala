@@ -25,11 +25,14 @@ class FfmPollingSystemSuite extends FunSuite {
     assertEquals(FfmPollingSystem.availability, Right(()))
   }
 
-  test("select() returns the epoll system") {
-    assert(FfmPollingSystem.select().exists(_.isInstanceOf[FfmEpollSystem]))
+  test("select() returns epoll on Linux and kqueue on macOS") {
+    val selected = FfmPollingSystem.select()
+    if (internal.Libc.IS_LINUX) assert(selected.exists(_.isInstanceOf[FfmEpollSystem]), selected)
+    else assert(selected.exists(_.isInstanceOf[FfmKqueueSystem]), selected)
   }
 
   test("epoll_pwait2 probe does not throw") {
+    assume(internal.Libc.IS_LINUX, "epoll is Linux-only")
     FfmEpollSystem.epollPwait2Available
   }
 }

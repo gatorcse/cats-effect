@@ -18,7 +18,7 @@ package cats.effect
 package ffm
 
 import cats.effect.ffm.internal.FfmEpollSyscalls
-import cats.effect.unsafe.{EpollEventLoop, EpollPollingSystem}
+import cats.effect.unsafe.{EpollBackend, EventLoop, EventLoopPollingSystem}
 
 /**
  * A [[cats.effect.unsafe.PollingSystem PollingSystem]] for Linux backed by `epoll`, called
@@ -29,15 +29,16 @@ import cats.effect.unsafe.{EpollEventLoop, EpollPollingSystem}
  * Usually obtained through [[FfmPollingSystem]], which falls back to `SelectorSystem` when FFM
  * or epoll is unavailable.
  *
- * The event loop itself (`EpollEventLoop`) is shared with the Scala Native `EpollSystem`; this
- * class only supplies the FFM syscalls. Design:
+ * The event loop itself (`EventLoop`) is shared with [[FfmKqueueSystem]] and with the Scala
+ * Native `EpollSystem` and `KqueueSystem`; this class only supplies the FFM epoll syscalls.
+ * Design:
  *
  *   - Registrations are edge-triggered. Readiness is published to each handle as a counter, so
  *     a fiber that races a notification never misses it.
  *   - `epoll_data` holds a generation-tagged handle id (slot, generation), not a pointer. An
  *     event for a registration that was removed, or whose slot was reused, is dropped.
  *   - Wake-ups go through an `eventfd`, debounced so that only the first interrupt per park
- *     writes, and never from the owner thread. Interrupts and deregistrations that race
+ *     writes. Interrupts and deregistrations that race
  *     `closePoller` never touch a closed (and possibly reused) file descriptor.
  *   - Timeouts are in nanoseconds via `epoll_pwait2` when the kernel allows it, otherwise
  *     milliseconds rounded up, so a sub-millisecond timer parks instead of spinning.
@@ -45,12 +46,12 @@ import cats.effect.unsafe.{EpollEventLoop, EpollPollingSystem}
  *   - Each handle direction is serialized by a lightweight lock instead of `std.Mutex`.
  */
 final class FfmEpollSystem private (maxEvents: Int, nanosecondTimeouts: Boolean)
-    extends EpollPollingSystem {
+    extends EventLoopPollingSystem {
 
-  type Poller = EpollEventLoop.Poller
+  type Poller = EventLoop.Poller
 
   def makePoller(): Poller =
-    new EpollEventLoop.Poller(new FfmEpollSyscalls(maxEvents, nanosecondTimeouts))
+    new EventLoop.Poller(new EpollBackend(new FfmEpollSyscalls(maxEvents, nanosecondTimeouts)))
 
   override def toString: String =
     s"FfmEpollSystem(maxEvents = $maxEvents, nanosecondTimeouts = $nanosecondTimeouts)"

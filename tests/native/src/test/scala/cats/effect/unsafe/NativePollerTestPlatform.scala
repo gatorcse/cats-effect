@@ -39,21 +39,6 @@ trait NativePollerTestPlatform extends PollerTestPlatform {
   // the JVM ignores SIGPIPE; Native would die on a write to a closed pipe instead of seeing EPIPE
   signal(SIGPIPE, SIG_IGN)
 
-  def epollSupported: Boolean = LinktimeInfo.isLinux
-
-  def epollPwait2Available: Boolean =
-    if (LinktimeInfo.isLinux) NativeEpollSyscalls.epollPwait2Available else false
-
-  def makeSyscalls(maxEvents: Int, nanosecondTimeouts: Boolean): EpollSyscalls =
-    if (LinktimeInfo.isLinux) new NativeEpollSyscalls(maxEvents, nanosecondTimeouts)
-    else throw new UnsupportedOperationException("epoll is Linux-only")
-
-  def epollSystem(): EpollPollingSystem =
-    if (LinktimeInfo.isLinux) EpollSystem
-    else throw new UnsupportedOperationException("epoll is Linux-only")
-
-  def runtimePollingSystem: Option[PollingSystem] = None
-
   private[this] def fail(op: String): Nothing =
     throw new IOException(s"$op failed: ${fromCString(strerror(errno))}")
 
@@ -92,8 +77,52 @@ trait NativePollerTestPlatform extends PollerTestPlatform {
   }
 }
 
-class NativeEpollPollerSuite extends EpollPollerContract with NativePollerTestPlatform
+trait NativeEpollTestBackend extends PollerTestPlatform {
+  def backendName: String = "epoll"
+  def backendSupported: Boolean = LinktimeInfo.isLinux
+  def nanosecondTimeoutsAvailable: Boolean =
+    if (LinktimeInfo.isLinux) NativeEpollSyscalls.epollPwait2Available else false
+  def makeBackend(maxEvents: Int, nanosecondTimeouts: Boolean): EventLoopBackend =
+    if (LinktimeInfo.isLinux)
+      new EpollBackend(new NativeEpollSyscalls(maxEvents, nanosecondTimeouts))
+    else throw new UnsupportedOperationException("epoll is Linux-only")
+  def pollingSystem(): PollingSystem { type Poller <: EventLoop.Poller } =
+    if (LinktimeInfo.isLinux) EpollSystem
+    else throw new UnsupportedOperationException("epoll is Linux-only")
+  def runtimePollingSystem: Option[PollingSystem] =
+    if (LinktimeInfo.isLinux) Some(EpollSystem) else None
+}
 
-class NativeFileDescriptorPollerSuite
+trait NativeKqueueTestBackend extends PollerTestPlatform {
+  def backendName: String = "kqueue"
+  def backendSupported: Boolean = LinktimeInfo.isMac
+  def nanosecondTimeoutsAvailable: Boolean = true
+  def makeBackend(maxEvents: Int, nanosecondTimeouts: Boolean): EventLoopBackend =
+    if (LinktimeInfo.isMac) new KqueueBackend(new NativeKqueueSyscalls(maxEvents))
+    else throw new UnsupportedOperationException("kqueue is macOS-only here")
+  def pollingSystem(): PollingSystem { type Poller <: EventLoop.Poller } =
+    if (LinktimeInfo.isMac) KqueueSystem
+    else throw new UnsupportedOperationException("kqueue is macOS-only here")
+  def runtimePollingSystem: Option[PollingSystem] =
+    if (LinktimeInfo.isMac) Some(KqueueSystem) else None
+}
+
+class NativeEpollPollerSuite
+    extends EventLoopPollerContract
+    with NativePollerTestPlatform
+    with NativeEpollTestBackend
+
+class NativeEpollFileDescriptorPollerSuite
     extends FileDescriptorPollerContract
     with NativePollerTestPlatform
+    with NativeEpollTestBackend
+
+class NativeKqueuePollerSuite
+    extends EventLoopPollerContract
+    with NativePollerTestPlatform
+    with NativeKqueueTestBackend
+
+class NativeKqueueFileDescriptorPollerSuite
+    extends FileDescriptorPollerContract
+    with NativePollerTestPlatform
+    with NativeKqueueTestBackend

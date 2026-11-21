@@ -25,32 +25,32 @@ import java.util.concurrent.atomic.AtomicReference
 import munit.FunSuite
 
 /**
- * Contract tests that drive one epoll poller directly, without a runtime, so that event
- * batches, wake-ups and timeouts can be observed exactly. Each case names the Netty issue it
- * guards. The same cases run on the JVM (FFM) and on Scala Native (`@extern`).
+ * Contract tests that drive one event-loop poller (epoll or kqueue) directly, without a
+ * runtime, so that event batches, wake-ups and timeouts can be observed exactly. Each case
+ * names the Netty issue it guards. The same cases run on the JVM (FFM) and on Scala Native
+ * (`@extern`).
  */
-abstract class EpollPollerContract extends FunSuite with PollerTestPlatform {
+abstract class EventLoopPollerContract extends FunSuite with PollerTestPlatform {
 
-  override def munitIgnore: Boolean = !epollSupported
+  override def munitIgnore: Boolean = !backendSupported
 
-  def withPoller[A](maxEvents: Int = 64, nanos: Boolean = true)(
-      f: EpollEventLoop.Poller => A): A = {
-    val poller = newPoller(maxEvents, nanos && epollPwait2Available)
+  def withPoller[A](maxEvents: Int = 64, nanos: Boolean = true)(f: EventLoop.Poller => A): A = {
+    val poller = newPoller(maxEvents, nanos && nanosecondTimeoutsAvailable)
     try f(poller)
     finally poller.close()
   }
 
-  def newPoller(maxEvents: Int = 64, nanos: Boolean = false): EpollEventLoop.Poller =
-    new EpollEventLoop.Poller(makeSyscalls(maxEvents, nanos))
+  def newPoller(maxEvents: Int = 64, nanos: Boolean = false): EventLoop.Poller =
+    new EventLoop.Poller(makeBackend(maxEvents, nanos))
 
-  def register(p: EpollEventLoop.Poller, fd: Int, reads: Boolean, writes: Boolean) =
+  def register(p: EventLoop.Poller, fd: Int, reads: Boolean, writes: Boolean) =
     p.register(fd, reads, writes).fold(throw _, identity)
 
   /**
    * Runs `poll` on another thread; the reference holds (result, elapsed nanos).
    */
   def pollOnThread(
-      p: EpollEventLoop.Poller,
+      p: EventLoop.Poller,
       nanos: Long): (AtomicReference[(PollResult, Long)], CountDownLatch) = {
     val result = new AtomicReference[(PollResult, Long)]
     val done = new CountDownLatch(1)
@@ -78,6 +78,29 @@ abstract class EpollPollerContract extends FunSuite with PollerTestPlatform {
         assert(p.processReadyEvents())
         assertEquals(h.readReadyCount, 1)
         assertEquals(p.poll(0), PollResult.Interrupted) // no new edge
+      } finally { close(r); close(w) }
+    }
+  }
+
+  test("a rejected read+write registration does not keep the direction it did claim") {
+    withPoller() { p =>
+      val (r, w) = pipe()
+      try {
+        if (emulated) {
+          // libkqueue refuses a write filter on a pipe's read end, after adding its read filter
+          assert(p.register(r, reads = true, writes = true).isLeft, "libkqueue accepted it")
+          register(p, r, reads = true, writes = false).deregister()
+        }
+        val h = register(p, w, reads = false, writes = true)
+        assert(p.register(w, reads = true, writes = true).isLeft, "duplicate accepted")
+        if (backendName == "kqueue" && !emulated) {
+          // kqueue registers per direction: the read filter alone is free, and must still be
+          val h2 = register(p, w, reads = true, writes = false)
+          h2.deregister()
+        }
+        h.deregister()
+        assertEquals(p.registrationCount, 0)
+        if (!emulated) register(p, w, reads = true, writes = true).deregister()
       } finally { close(r); close(w) }
     }
   }
@@ -127,7 +150,7 @@ abstract class EpollPollerContract extends FunSuite with PollerTestPlatform {
   }
 
   test("an owner that wakes itself just before parking is not lost") {
-    val system = epollSystem()
+    val system = pollingSystem()
     val p = system.makePoller()
     try {
       // a worker flags itself parked, then notifyIfWorkPending -> notifyParked may pick its own
@@ -224,6 +247,30 @@ abstract class EpollPollerContract extends FunSuite with PollerTestPlatform {
     }
   }
 
+  test("a second registration of a registered fd is rejected and leaves the first intact") {
+    withPoller() { p =>
+      val (r, w) = pipe()
+      try {
+        val h = register(p, r, reads = true, writes = false)
+        // kqueue would silently move the (fd, filter) entry to the newcomer; epoll says EEXIST
+        assert(p.register(r, reads = true, writes = false).isLeft, "duplicate accepted")
+        assert(p.register(r, reads = true, writes = true).isLeft, "duplicate accepted")
+        assertEquals(p.registrationCount, 1)
+        writeUnsafe(w, Array[Byte](1))
+        assertEquals(p.poll(0), PollResult.Complete)
+        p.processReadyEvents()
+        assertEquals(h.readReadyCount, 1, "the first registration lost its events")
+        h.deregister()
+        // and once released, the fd can be registered again
+        val h2 = register(p, r, reads = true, writes = false)
+        writeUnsafe(w, Array[Byte](2))
+        assertEquals(p.poll(0), PollResult.Complete)
+        p.processReadyEvents()
+        assertEquals(h2.readReadyCount, 1)
+      } finally { close(r); close(w) }
+    }
+  }
+
   test("a reused fd and slot never reach the old handle (netty#15150)") {
     withPoller() { p =>
       val (r1, w1) = pipe()
@@ -270,6 +317,7 @@ abstract class EpollPollerContract extends FunSuite with PollerTestPlatform {
   }
 
   test("an unconnected socket does not cause an EPOLLHUP storm (netty#16250)") {
+    assume(!emulated, "libkqueue rejects unconnected sockets (EFAULT)")
     withPoller() { p =>
       val fd = unconnectedTcpSocket()
       try {
