@@ -112,7 +112,7 @@ ThisBuild / developers := List(
 val PrimaryOS = "ubuntu-latest"
 val ArmOS = "ubuntu-22.04-arm"
 val Windows = "windows-2022"
-val MacOS = "macos-14"
+val MacOS = "macos-15"
 
 val ScalaNativeLLVM = "/usr/lib/llvm-15/bin"
 val ArmNativeCI = s"matrix.ci == '${CI.Native.command}' && matrix.os == '$ArmOS'"
