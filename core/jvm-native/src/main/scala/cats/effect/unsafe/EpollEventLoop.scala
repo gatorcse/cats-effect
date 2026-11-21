@@ -362,6 +362,13 @@ private[effect] object EpollEventLoop {
     private[effect] def needsPoll(): Boolean = registered.get() > 0
 
     /**
+     * Internal state, for test failure messages.
+     */
+    private[effect] def diagnostics: String =
+      s"wakeupPending=${wakeupPending.get()}, closed=$isClosed, " +
+        s"readyEventCount=$readyEventCount, pendingFree=${pendingFree.size()}"
+
+    /**
      * Number of live registrations.
      */
     def registrationCount: Int = registered.get()

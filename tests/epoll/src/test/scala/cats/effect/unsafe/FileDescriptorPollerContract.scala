@@ -207,10 +207,37 @@ abstract class FileDescriptorPollerContract extends FunSuite with PollerTestPlat
   real("works across IO.blocking (poller handoff to a new thread)") {
     registeredPipe.use { pipe =>
       val buf = new Array[Byte](1)
-      val roundTrip =
-        pipe.write(Array[Byte](9), 0, 1).background.surround(pipe.read(buf, 0, 1))
-      (roundTrip *> IO.blocking(Thread.sleep(5))).replicateA_(50) *> roundTrip
+      @volatile var step = "start"
+      def roundTrip(i: Int) =
+        IO { step = s"$i: write+read" } *>
+          pipe
+            .write(Array[Byte](9), 0, 1)
+            .flatTap(_ => IO { step = s"$i: written, reading" })
+            .background
+            .surround(pipe.read(buf, 0, 1))
+      val run = (0 until 50).toList.traverse_ { i =>
+        roundTrip(i) *> IO { step = s"$i: blocking" } *> IO.blocking(Thread.sleep(5))
+      } *> roundTrip(50)
+      // on a hang, say where, so that a CI-only failure is diagnosable
+      run.timeoutTo(
+        15.seconds,
+        IO.defer(IO.raiseError(new AssertionError(s"hung at [$step]; ${describe(pipe)}"))))
     }
+  }
+
+  private def describe(pipe: Pipe): String = {
+    def h(x: FileDescriptorPollHandle) = x match {
+      case e: EpollEventLoop.PollHandle =>
+        val p = e.poller
+        s"ready=${e.readReadyCount}/${e.writeReadyCount} poller(regs=${p.registrationCount}, " +
+          s"readsOutstanding=${p.readOperationsOutstandingCount()}, " +
+          s"writesOutstanding=${p.writeOperationsOutstandingCount()}, " +
+          s"wakeups=${p.wakeupWriteCount}, ${p.diagnostics})"
+      case other => other.toString
+    }
+    val pending = tryRead(pipe.readFd, new Array[Byte](16), 0, 16)
+    s"read handle: ${h(pipe.readHandle)}; write handle: ${h(pipe.writeHandle)}; " +
+      s"bytes in pipe: $pending"
   }
 
   real("sub-millisecond sleeps complete") {
