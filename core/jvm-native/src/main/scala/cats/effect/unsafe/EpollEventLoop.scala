@@ -21,7 +21,7 @@ import cats.effect.unsafe.metrics.PollerMetrics
 
 import java.io.IOException
 import java.util.concurrent.ConcurrentLinkedQueue
-import java.util.concurrent.atomic.{AtomicBoolean, AtomicInteger, AtomicLong}
+import java.util.concurrent.atomic.{AtomicBoolean, AtomicInteger, AtomicLong, AtomicReference}
 
 import EpollConstants._
 
@@ -49,123 +49,114 @@ private[effect] object EpollEventLoop {
       writes: Boolean
   ) extends EdgeTriggeredPollHandle {
 
-    @volatile private[effect] var deregistered: Boolean = false
+    /**
+     * Set once, by whichever thread deregisters first.
+     */
+    private[effect] val deregisteredFlag = new AtomicBoolean(false)
+    private[effect] def deregistered: Boolean = deregisteredFlag.get()
 
-    @volatile private[this] var readReadyCounter = 0
-    @volatile private[this] var readCallback: Either[Throwable, Int] => Unit = null
-    @volatile private[this] var writeReadyCounter = 0
-    @volatile private[this] var writeCallback: Either[Throwable, Int] => Unit = null
+    private[this] val readState =
+      new Readiness(poller.readSubmitted, poller.readSucceeded, poller.readCanceled)
+    private[this] val writeState =
+      new Readiness(poller.writeSubmitted, poller.writeSucceeded, poller.writeCanceled)
 
     private[this] val readLock = new PollHandleLock
     private[this] val writeLock = new PollHandleLock
 
-    def readReadyCount: Int = readReadyCounter
-    def writeReadyCount: Int = writeReadyCounter
+    def readReadyCount: Int = readState.count
+    def writeReadyCount: Int = writeState.count
 
     /**
      * Called by the owning poller's thread with the event flags.
      */
     private[EpollEventLoop] def notify(events: Int): Unit = {
-      if (reads && (events & ReadWake) != 0) {
-        val counter = readReadyCounter + 1
-        readReadyCounter = counter
-        val cb = readCallback
-        readCallback = null
-        if (cb ne null) {
-          poller.readSucceeded.incrementAndGet()
-          cb(Right(counter))
-        }
-      }
-      if (writes && (events & WriteWake) != 0) {
-        val counter = writeReadyCounter + 1
-        writeReadyCounter = counter
-        val cb = writeCallback
-        writeCallback = null
-        if (cb ne null) {
-          poller.writeSucceeded.incrementAndGet()
-          cb(Right(counter))
-        }
-      }
+      if (reads && (events & ReadWake) != 0) readState.fire()
+      if (writes && (events & WriteWake) != 0) writeState.fire()
     }
 
-    def awaitReadReady(seen: Int): IO[Int] =
-      IO.asyncCheckAttempt[Int] { cb =>
-        IO {
-          val now = readReadyCounter
-          if (now != seen) Right(now)
-          else {
-            readCallback = cb
-            val again = readReadyCounter // re-check after publishing the callback
-            if (again != seen) {
-              readCallback = null
-              Right(again)
-            } else {
-              poller.readSubmitted.incrementAndGet()
-              Left(Some(IO {
-                if (readCallback ne null) {
-                  readCallback = null
-                  poller.readCanceled.incrementAndGet()
-                  ()
-                }
-                ()
-              }))
-            }
-          }
-        }
-      }
+    def awaitReadReady(seen: Int): IO[Int] = readState.await(seen)
 
-    def awaitWriteReady(seen: Int): IO[Int] =
-      IO.asyncCheckAttempt[Int] { cb =>
-        IO {
-          val now = writeReadyCounter
-          if (now != seen) Right(now)
-          else {
-            writeCallback = cb
-            val again = writeReadyCounter
-            if (again != seen) {
-              writeCallback = null
-              Right(again)
-            } else {
-              poller.writeSubmitted.incrementAndGet()
-              Left(Some(IO {
-                if (writeCallback ne null) {
-                  writeCallback = null
-                  poller.writeCanceled.incrementAndGet()
-                  ()
-                }
-                ()
-              }))
-            }
-          }
-        }
-      }
+    def awaitWriteReady(seen: Int): IO[Int] = writeState.await(seen)
 
     def pollReadRec[A, B](a: A)(f: A => IO[Either[A, B]]): IO[B] =
       readLock.surround {
         def go(a: A, before: Int): IO[B] =
           f(a).flatMap {
-            case Left(a) => awaitReadReady(before).flatMap(go(a, _))
+            case Left(a) => readState.await(before).flatMap(go(a, _))
             case Right(b) => IO.pure(b)
           }
-        IO(readReadyCounter).flatMap(go(a, _))
+        IO(readState.count).flatMap(go(a, _))
       }
 
     def pollWriteRec[A, B](a: A)(f: A => IO[Either[A, B]]): IO[B] =
       writeLock.surround {
         def go(a: A, before: Int): IO[B] =
           f(a).flatMap {
-            case Left(a) => awaitWriteReady(before).flatMap(go(a, _))
+            case Left(a) => writeState.await(before).flatMap(go(a, _))
             case Right(b) => IO.pure(b)
           }
-        IO(writeReadyCounter).flatMap(go(a, _))
+        IO(writeState.count).flatMap(go(a, _))
       }
 
     private[effect] def deregister(): Unit = poller.deregister(this)
   }
 
+  /**
+   * One direction of a handle: a ready counter bumped by the owner on each edge, and at most
+   * one waiting callback. The callback slot is only ever taken with an atomic swap or CAS, so
+   * the owner firing, a waiter re-checking, and a canceled waiter's finalizer can each claim a
+   * given callback at most once and can never clear a newer waiter's callback.
+   */
+  private final class Readiness(
+      submitted: AtomicLong,
+      succeeded: AtomicLong,
+      canceled: AtomicLong) {
+
+    @volatile private[this] var counter = 0
+    private[this] val callback = new AtomicReference[Either[Throwable, Int] => Unit]
+
+    def count: Int = counter
+
+    /**
+     * Owner thread only.
+     */
+    def fire(): Unit = {
+      val next = counter + 1
+      counter = next
+      val cb = callback.getAndSet(null)
+      if (cb ne null) {
+        succeeded.incrementAndGet()
+        cb(Right(next))
+      }
+    }
+
+    def await(seen: Int): IO[Int] =
+      IO.asyncCheckAttempt[Int] { cb =>
+        IO {
+          val now = counter
+          if (now != seen) Right(now)
+          else {
+            submitted.incrementAndGet()
+            callback.set(cb)
+            val again = counter // re-check after publishing the callback
+            if (again != seen) {
+              // if the owner already took cb it completes it too; the second completion is a
+              // no-op, and it has counted the success
+              if (callback.compareAndSet(cb, null)) succeeded.incrementAndGet()
+              Right(again)
+            } else
+              Left(Some(IO {
+                if (callback.compareAndSet(cb, null)) canceled.incrementAndGet()
+                ()
+              }))
+          }
+        }
+      }
+  }
+
   private final val ReadWake = EPOLLIN | EPOLLRDHUP | EPOLLHUP | EPOLLERR
-  private final val WriteWake =
-    EPOLLOUT | EPOLLRDHUP | EPOLLHUP | EPOLLERR
+  // not RDHUP: a peer that stopped writing can still be written to
+  private final val WriteWake = EPOLLOUT | EPOLLHUP | EPOLLERR
 
   /**
    * Generations use 31 bits so that no id is ever [[WakeupId]].
@@ -307,8 +298,7 @@ private[effect] object EpollEventLoop {
     }
 
     private[effect] def deregister(handle: PollHandle): Unit =
-      if (!handle.deregistered) {
-        handle.deregistered = true
+      if (handle.deregisteredFlag.compareAndSet(false, true)) {
         registered.decrementAndGet()
         whileOpen {
           // thread-safe; ENOENT/EBADF if the fd was already closed, which is fine

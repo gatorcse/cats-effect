@@ -32,6 +32,11 @@ package cats.effect
  * }}}
  *
  * Phase 0 measured this at one fewer syscall per message. The counters only ever increase.
+ *
+ * Release the registration (the `Resource` from `registerFileDescriptor`) before closing the
+ * descriptor. Deregistration names the descriptor by number, so if it is closed first and the
+ * number is reused and registered again on the same poller, the late deregistration removes the
+ * new registration.
  */
 trait EdgeTriggeredPollHandle extends FileDescriptorPollHandle {
 

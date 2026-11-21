@@ -160,7 +160,11 @@ public final class Libc {
 
   private static final MethodHandle close = bind("close", I_I, CAPTURE);
   private static final MethodHandle fcntl =
-      bind("fcntl", FunctionDescriptor.of(JAVA_INT, JAVA_INT, JAVA_INT, JAVA_INT), CAPTURE);
+      bind(
+          "fcntl",
+          FunctionDescriptor.of(JAVA_INT, JAVA_INT, JAVA_INT, JAVA_INT),
+          Linker.Option.firstVariadicArg(2),
+          CAPTURE);
   private static final MethodHandle pipe2 = bind("pipe2", I_PI, CAPTURE);
   private static final MethodHandle socketpair = bind("socketpair", I_IIIP_SP, CAPTURE);
   private static final MethodHandle socket = bind("socket", I_III, CAPTURE);

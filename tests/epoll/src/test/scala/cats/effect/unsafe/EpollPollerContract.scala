@@ -137,27 +137,39 @@ abstract class EpollPollerContract extends FunSuite with PollerTestPlatform {
   }
 
   test("interrupts racing close never fail or write after close (netty#16836, #9586)") {
+    var writes = 0L
     (1 to 50).foreach { _ =>
       val p = newPoller()
       val start = new CountDownLatch(1)
+      val stop = new java.util.concurrent.atomic.AtomicBoolean(false)
       val failure = new AtomicReference[Throwable]
       val threads = (1 to 4).map { _ =>
         thread {
           start.await()
-          try { (1 to 200).foreach(_ => p.interrupt()) }
+          try { while (!stop.get()) p.interrupt() }
           catch { case t: Throwable => failure.set(t) }
         }
       }
       threads.foreach(_.start())
       start.countDown()
+      // re-arm the debounce, as an owner would, until interrupts are really reaching the eventfd
+      // write; then close while they still are, rather than while they stop at the pending flag
+      val deadline = System.nanoTime() + 1000000000L
+      while (p.wakeupWriteCount < 3 && System.nanoTime() < deadline) {
+        p.poll(0)
+        p.processReadyEvents()
+      }
       p.close()
+      stop.set(true)
       threads.foreach(_.join())
+      writes += p.wakeupWriteCount
       val after = p.wakeupWriteCount
       p.interrupt()
       assertEquals(p.wakeupWriteCount, after, "interrupt wrote after close")
       assert(p.isClosed)
       if (failure.get() ne null) throw failure.get()
     }
+    assert(writes >= 150L, s"only $writes eventfd writes: the race was not exercised")
   }
 
   for (nanos <- List(true, false))

@@ -80,7 +80,8 @@ private[unsafe] final class NativeEpollSyscalls(val maxEvents: Int, nanosecondTi
           .syscall(SYS_epoll_pwait2, epfd.toLong, events, maxEvents.toLong, timespec, null, 0L)
           .toInt
       } else {
-        val millis = (nanos + 999999L) / 1000000L
+        // round up, without overflowing near Long.MaxValue (a negative timeout waits forever)
+        val millis = nanos / 1000000L + (if (nanos % 1000000L != 0L) 1L else 0L)
         epoll
           .awaiting
           .epoll_wait(epfd, events, maxEvents, Math.min(millis, Int.MaxValue.toLong).toInt)

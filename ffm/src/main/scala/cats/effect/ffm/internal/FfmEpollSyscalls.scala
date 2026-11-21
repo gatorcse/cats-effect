@@ -82,7 +82,8 @@ private[ffm] final class FfmEpollSyscalls(val maxEvents: Int, nanosecondTimeouts
         timespec.set(ValueLayout.JAVA_LONG, 8L, nanos % 1000000000L)
         Epoll.epollPwait2(cap, epfd, events, maxEvents, timespec)
       } else {
-        val millis = (nanos + 999999L) / 1000000L
+        // round up, without overflowing near Long.MaxValue (a negative timeout waits forever)
+        val millis = nanos / 1000000L + (if (nanos % 1000000L != 0L) 1L else 0L)
         Epoll.epollWait(
           cap,
           epfd,

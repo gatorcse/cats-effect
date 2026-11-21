@@ -15,11 +15,12 @@ concurrency:
 
 jobs:
   jvm-ffm:
-    name: JVM FFM (JDK ${{ matrix.java }}, Scala ${{ matrix.scala }})
-    runs-on: ubuntu-latest
+    name: JVM FFM (${{ matrix.os }}, JDK ${{ matrix.java }}, Scala ${{ matrix.scala }})
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
+        os: [ubuntu-latest, ubuntu-24.04-arm] # x86_64 and aarch64 epoll_event layouts
         java: ['25']
         scala: ['2.12.21', '2.13.18', '3.3.7']
     steps:

@@ -55,7 +55,9 @@ object FfmPollingSystem {
     }
 
   /**
-   * The FFM polling system for this platform, or why there is none. Never throws.
+   * The FFM polling system for this platform, or why there is none. Never throws on JDK 25+.
+   * The module itself is compiled for JDK 25, so on an older JVM even loading this object fails
+   * with `UnsupportedClassVersionError`; keep `cats-effect-ffm` off the classpath there.
    */
   def select(): Either[Unavailable, PollingSystem] =
     availability.flatMap { _ =>
