@@ -42,10 +42,14 @@ abstract class EventLoopPollingSystem private[effect] () extends PollingSystem {
   def needsPoll(poller: Poller): Boolean = poller.needsPoll()
 
   /**
-   * Always wakes the poller, even when called from `targetThread`. During an `IO.blocking`
-   * handoff the pool can still name the old, now blocking, thread as the poller's owner while
-   * its replacement is parked on the same poller; skipping "self" wake-ups would lose that
-   * wake-up. The eventfd write is debounced, so a redundant one is cheap.
+   * Always wakes the poller, even when called from `targetThread`. A worker that is about to
+   * park first flags itself `ParkedPolling` and then calls `notifyIfWorkPending`, whose
+   * `notifyParked` scans every index, its own included. If it picks itself, it marks itself
+   * awake and interrupts its own poller, then goes on to `poll(-1)`. Skipping that "self"
+   * wake-up left it parked forever with nothing to wake it (its signal is already `Unparked`).
+   * The eventfd write stays readable, so the next poll returns at once; it is debounced, so a
+   * redundant one is cheap. (`LockSupport.unpark` and NIO's `Selector.wakeup` are sticky the
+   * same way.)
    */
   def interrupt(targetThread: Thread, targetPoller: Poller): Unit =
     targetPoller.interrupt()
