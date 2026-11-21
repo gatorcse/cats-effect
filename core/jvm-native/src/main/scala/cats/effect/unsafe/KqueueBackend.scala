@@ -50,23 +50,58 @@ private[effect] final class KqueueBackend(sys: KqueueSyscalls) extends EventLoop
     }
   }
 
+  // --- the (ident, filter) pairs in use -------------------------------------------------------
+  //
+  // kqueue keys an entry by (ident, filter): EV_ADD on a pair that already exists modifies it
+  // (taking over its udata) instead of failing like epoll's EEXIST, and EV_DELETE removes it for
+  // everyone. So each pair has one owner at a time, a handle direction or a one-shot, and a
+  // second claim fails with EEXIST.
+
+  private[this] val claimed = ConcurrentHashMap.newKeySet[java.lang.Long]()
+
+  @inline private[this] def key(ident: Int, filter: Short): Long =
+    (filter.toLong << 32) | (ident.toLong & 0xffffffffL)
+
+  private[this] def claim(ident: Int, filter: Short): Boolean = claimed.add(key(ident, filter))
+
+  private[this] def unclaim(ident: Int, filter: Short): Unit = {
+    claimed.remove(key(ident, filter))
+    ()
+  }
+
+  private[this] def addFilter(fd: Int, filter: Short, id: Long): Int =
+    if (!claim(fd, filter)) EEXIST
+    else {
+      val err = sys.keventChange(kq, fd.toLong, filter, EV_ADD | EV_CLEAR, 0, id)
+      if (err != 0) unclaim(fd, filter)
+      err
+    }
+
+  private[this] def deleteFilter(fd: Int, filter: Short): Unit = {
+    // delete before releasing the claim, so that nobody else's entry for the pair is deleted
+    sys.keventChange(kq, fd.toLong, filter, EV_DELETE, 0, 0L)
+    unclaim(fd, filter)
+  }
+
   def add(fd: Int, reads: Boolean, writes: Boolean, id: Long): Int = {
-    val err =
-      if (reads) sys.keventChange(kq, fd.toLong, EVFILT_READ, EV_ADD | EV_CLEAR, 0, id) else 0
+    val err = if (reads) addFilter(fd, EVFILT_READ, id) else 0
     if (err != 0 || !writes) err
     else {
-      val werr = sys.keventChange(kq, fd.toLong, EVFILT_WRITE, EV_ADD | EV_CLEAR, 0, id)
-      if (werr != 0 && reads) {
-        sys.keventChange(kq, fd.toLong, EVFILT_READ, EV_DELETE, 0, 0L)
-        ()
-      }
+      val werr = addFilter(fd, EVFILT_WRITE, id)
+      if (werr != 0 && reads) deleteFilter(fd, EVFILT_READ) // only what this call added
       werr
     }
   }
 
+  /**
+   * As with epoll, removal is by fd number: release a registration before closing its fd. If
+   * the fd is closed first and its number reused, registering the new fd fails with EEXIST
+   * until the old registration is released (rather than silently taking over or losing its
+   * filters).
+   */
   def remove(fd: Int, reads: Boolean, writes: Boolean): Unit = {
-    if (reads) { sys.keventChange(kq, fd.toLong, EVFILT_READ, EV_DELETE, 0, 0L); () }
-    if (writes) { sys.keventChange(kq, fd.toLong, EVFILT_WRITE, EV_DELETE, 0, 0L); () }
+    if (reads) deleteFilter(fd, EVFILT_READ)
+    if (writes) deleteFilter(fd, EVFILT_WRITE)
   }
 
   def poll(nanos: Long): Int = sys.keventWait(kq, nanos)
@@ -96,13 +131,13 @@ private[effect] final class KqueueBackend(sys: KqueueSyscalls) extends EventLoop
 
   // --- one-shot filters, for KqueueSystem.awaitEvent ----------------------------------------
 
-  private[this] val oneShots =
-    new ConcurrentHashMap[java.lang.Long, Either[Throwable, Long] => Unit]
+  private[this] val oneShots = new ConcurrentHashMap[java.lang.Long, KqueueBackend.OneShot]
   private[this] val nextOneShotId = new AtomicLong(WakeupId)
 
   /**
    * Adds a one-shot `(ident, filter)` event that completes `cb` with the event's `data`. Owner
-   * thread. Returns the id to pass to [[cancelOneShot]].
+   * thread. Fails `cb` with EEXIST if a handle or another one-shot already uses the pair.
+   * Returns the id to pass to [[cancelOneShot]].
    */
   private[unsafe] def addOneShot(
       ident: Int,
@@ -111,30 +146,40 @@ private[effect] final class KqueueBackend(sys: KqueueSyscalls) extends EventLoop
       fflags: Int,
       cb: Either[Throwable, Long] => Unit): Long = {
     val id = nextOneShotId.decrementAndGet()
-    oneShots.put(id, cb)
-    val err =
-      sys.keventChange(kq, ident.toLong, filter, flags | EV_ADD | EV_ONESHOT, fflags, id)
-    if (err != 0 && (oneShots.remove(id) ne null))
-      cb(Left(new IOException(s"kevent(ident $ident, filter $filter) failed: errno $err")))
+    if (!claim(ident, filter))
+      cb(Left(new IOException(s"kevent(ident $ident, filter $filter) is already in use")))
+    else {
+      oneShots.put(id, new KqueueBackend.OneShot(ident, filter, cb))
+      val err =
+        sys.keventChange(kq, ident.toLong, filter, flags | EV_ADD | EV_ONESHOT, fflags, id)
+      if (err != 0 && (oneShots.remove(id) ne null)) {
+        unclaim(ident, filter)
+        cb(Left(new IOException(s"kevent(ident $ident, filter $filter) failed: errno $err")))
+      }
+    }
     id
   }
 
   /**
-   * Forgets a one-shot event; if it fires later it is ignored. Any thread.
+   * Cancels a one-shot event that has not fired: removes it from the kqueue, so that it neither
+   * fires later nor lingers for the next user of the pair. Any thread. Returns false if it had
+   * already completed.
    */
-  private[unsafe] def cancelOneShot(id: Long): Unit = {
-    oneShots.remove(id)
-    ()
+  private[unsafe] def cancelOneShot(id: Long): Boolean = {
+    val os = oneShots.remove(id)
+    if (os ne null) deleteFilter(os.ident, os.filter)
+    os ne null
   }
 
   def dispatchOther(i: Int, id: Long): Boolean = {
-    val cb = oneShots.remove(id)
-    if (cb eq null) false
+    val os = oneShots.remove(id)
+    if (os eq null) false
     else {
+      unclaim(os.ident, os.filter) // the kernel dropped the EV_ONESHOT entry when reporting it
       val data = sys.eventData(i)
       if ((sys.eventFlags(i) & EV_ERROR) != 0)
-        cb(Left(new IOException(s"kevent failed: errno $data")))
-      else cb(Right(data))
+        os.cb(Left(new IOException(s"kevent failed: errno $data")))
+      else os.cb(Right(data))
       true
     }
   }
@@ -145,4 +190,11 @@ private[effect] final class KqueueBackend(sys: KqueueSyscalls) extends EventLoop
     sys.close(kq)
     sys.release()
   }
+}
+
+private object KqueueBackend {
+  private final class OneShot(
+      val ident: Int,
+      val filter: Short,
+      val cb: Either[Throwable, Long] => Unit)
 }

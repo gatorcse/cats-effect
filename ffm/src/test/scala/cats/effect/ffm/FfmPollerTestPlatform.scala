@@ -110,8 +110,13 @@ trait FfmEpollTestBackend extends PollerTestPlatform {
  */
 trait FfmKqueueTestBackend extends PollerTestPlatform {
   def backendName: String = "kqueue"
-  def backendSupported: Boolean =
-    Libc.IS_MAC || System.getProperty("cats.effect.ffm.kqueueLibrary") != null
+  def backendSupported: Boolean = {
+    val supported = Libc.IS_MAC || System.getProperty("cats.effect.ffm.kqueueLibrary") != null
+    // CI sets this where libkqueue is installed, so that the suites can't skip silently
+    if (!supported && sys.env.contains("REQUIRE_KQUEUE"))
+      throw new AssertionError("REQUIRE_KQUEUE is set but kqueue (or libkqueue) is unavailable")
+    supported
+  }
   def nanosecondTimeoutsAvailable: Boolean = true
   override def emulated: Boolean = !Libc.IS_MAC
   def makeBackend(maxEvents: Int, nanosecondTimeouts: Boolean): EventLoopBackend =

@@ -82,6 +82,11 @@ private[effect] object KqueueConstants {
   final val NOTE_TRIGGER = 0x01000000
 
   /**
+   * The same on Linux, macOS and the BSDs.
+   */
+  final val EEXIST = 17
+
+  /**
    * `kevent` rejects larger timeouts with `EINVAL` (Netty #13503); the worker recomputes its
    * deadline after a timeout, so clamping is invisible.
    */

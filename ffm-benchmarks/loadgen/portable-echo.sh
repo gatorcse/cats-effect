@@ -29,8 +29,9 @@ for server in $servers; do
     esac
     pid=$!
     for _ in $(seq 100); do nc -z 127.0.0.1 $port 2>/dev/null && break; sleep 0.1; done
-    result=$("$load" $port $2 $3 $4 "$WARMUP" "$DURATION" 2>/dev/null)
-    kill $pid; wait $pid 2>/dev/null || true
+    result=$("$load" $port $2 $3 $4 "$WARMUP" "$DURATION" 2>/dev/null) || result='{"error":"echoload failed"}'
+    kill $pid 2>/dev/null || true
+    wait $pid 2>/dev/null || true
     line="{\"os\":\"$(uname -s)-$(uname -m)\",\"server\":\"$server\",\"scenario\":\"$1\",${result#\{}"
     echo "$line" | tee -a "$out"
   done

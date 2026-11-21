@@ -64,7 +64,9 @@ object FfmPollingSystem {
     availability.flatMap { _ =>
       try Right(if (isLinux) FfmEpollSystem() else FfmKqueueSystem())
       catch {
-        case t: Throwable => Left(Unavailable(s"epoll initialization failed: $t"))
+        case t: Throwable =>
+          val name = if (isLinux) "epoll" else "kqueue"
+          Left(Unavailable(s"$name initialization failed: $t"))
       }
     }
 

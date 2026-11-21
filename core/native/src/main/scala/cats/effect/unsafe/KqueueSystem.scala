@@ -68,7 +68,8 @@ object KqueueSystem extends PollingSystem {
     /**
      * Waits for one occurrence of the `(ident, filter)` event, registered as a one-shot filter
      * with the given `flags` and `fflags`, and returns its `data`. For filters other than reads
-     * and writes on a descriptor, which `registerFileDescriptor` covers.
+     * and writes on a descriptor, which `registerFileDescriptor` covers. Fails if a registered
+     * handle or another pending `awaitEvent` already uses the same `(ident, filter)`.
      */
     def awaitEvent(
         ident: Int,
@@ -79,8 +80,37 @@ object KqueueSystem extends PollingSystem {
       IO.async[Long] { cb =>
         IO.async_[Option[IO[Unit]]] { cancelCb =>
           ctx.accessPoller { poller =>
-            val id = poller.backend.addOneShot(ident, filter, flags.toInt & 0xffff, fflags, cb)
-            cancelCb(Right(Some(IO(poller.backend.cancelOneShot(id)))))
+            // counted in the read/write metrics, as before the shared event loop
+            val (submitted, succeeded, errored, canceled) =
+              if (filter == KqueueConstants.EVFILT_READ)
+                (
+                  poller.readSubmitted,
+                  poller.readSucceeded,
+                  poller.readErrored,
+                  poller.readCanceled)
+              else if (filter == KqueueConstants.EVFILT_WRITE)
+                (
+                  poller.writeSubmitted,
+                  poller.writeSucceeded,
+                  poller.writeErrored,
+                  poller.writeCanceled)
+              else (null, null, null, null)
+            if (submitted ne null) { submitted.incrementAndGet(); () }
+            val counted: Either[Throwable, Long] => Unit = r => {
+              if (submitted ne null) {
+                (if (r.isRight) succeeded else errored).incrementAndGet()
+                ()
+              }
+              cb(r)
+            }
+            val id =
+              poller.backend.addOneShot(ident, filter, flags.toInt & 0xffff, fflags, counted)
+            cancelCb(Right(Some(IO {
+              if (poller.backend.cancelOneShot(id) && (canceled ne null)) {
+                canceled.incrementAndGet()
+                ()
+              }
+            })))
           }
         }
       }

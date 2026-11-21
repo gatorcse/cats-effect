@@ -42,6 +42,11 @@ private[unsafe] final class NativeKqueueSyscalls(val maxEvents: Int) extends Kqu
   private[this] val timespec: Ptr[Long] =
     stdlib.calloc(2.toCSize, sizeof[Long]).asInstanceOf[Ptr[Long]]
 
+  if ((events eq null) || (timespec eq null)) {
+    release()
+    throw new OutOfMemoryError("kqueue event list")
+  }
+
   def userFilter: Short = EVFILT_USER_MACOS
 
   def kqueueCreate(): Int = {

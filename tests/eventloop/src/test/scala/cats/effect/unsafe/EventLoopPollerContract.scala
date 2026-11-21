@@ -224,6 +224,30 @@ abstract class EventLoopPollerContract extends FunSuite with PollerTestPlatform 
     }
   }
 
+  test("a second registration of a registered fd is rejected and leaves the first intact") {
+    withPoller() { p =>
+      val (r, w) = pipe()
+      try {
+        val h = register(p, r, reads = true, writes = false)
+        // kqueue would silently move the (fd, filter) entry to the newcomer; epoll says EEXIST
+        assert(p.register(r, reads = true, writes = false).isLeft, "duplicate accepted")
+        assert(p.register(r, reads = true, writes = true).isLeft, "duplicate accepted")
+        assertEquals(p.registrationCount, 1)
+        writeUnsafe(w, Array[Byte](1))
+        assertEquals(p.poll(0), PollResult.Complete)
+        p.processReadyEvents()
+        assertEquals(h.readReadyCount, 1, "the first registration lost its events")
+        h.deregister()
+        // and once released, the fd can be registered again
+        val h2 = register(p, r, reads = true, writes = false)
+        writeUnsafe(w, Array[Byte](2))
+        assertEquals(p.poll(0), PollResult.Complete)
+        p.processReadyEvents()
+        assertEquals(h2.readReadyCount, 1)
+      } finally { close(r); close(w) }
+    }
+  }
+
   test("a reused fd and slot never reach the old handle (netty#15150)") {
     withPoller() { p =>
       val (r1, w1) = pipe()

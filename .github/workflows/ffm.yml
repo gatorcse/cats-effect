@@ -37,11 +37,17 @@ jobs:
       - uses: sbt/setup-sbt@v1
       - name: Install libkqueue (runs the kqueue suites on Linux too)
         if: runner.os == 'Linux'
-        # best effort: newer Ubuntu images may not package it, and then those suites are skipped
+        # ubuntu-24.04 packages it, so that runner must run the kqueue suites (REQUIRE_KQUEUE makes
+        # them fail rather than skip); newer images may not, and then they are skipped there
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq libkqueue0 || sudo apt-get install -y -qq libkqueue-dev ||
-            echo "::warning::libkqueue is not packaged on this image; the FFM kqueue suites are skipped here"
+          if [ "${{ matrix.os }}" = ubuntu-24.04-arm ]; then
+            sudo apt-get install -y -qq libkqueue0
+            echo REQUIRE_KQUEUE=1 >> "$GITHUB_ENV"
+          else
+            sudo apt-get install -y -qq libkqueue0 ||
+              echo "::warning::libkqueue is not packaged on this image; the FFM kqueue suites are skipped here"
+          fi
       - name: Core MiMa (JVM)
         if: runner.os == 'Linux'
         run: sbt ++${{ matrix.scala }} coreJVM/mimaReportBinaryIssues

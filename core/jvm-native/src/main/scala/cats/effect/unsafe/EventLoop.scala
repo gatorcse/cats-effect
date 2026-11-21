@@ -353,22 +353,25 @@ private[effect] object EventLoop {
     private[effect] val readSubmitted = new AtomicLong(0L)
     private[effect] val readSucceeded = new AtomicLong(0L)
     private[effect] val readCanceled = new AtomicLong(0L)
+    private[effect] val readErrored = new AtomicLong(0L)
     private[effect] val writeSubmitted = new AtomicLong(0L)
     private[effect] val writeSucceeded = new AtomicLong(0L)
     private[effect] val writeCanceled = new AtomicLong(0L)
+    private[effect] val writeErrored = new AtomicLong(0L)
 
     def readOperationsOutstandingCount(): Int =
-      (readSubmitted.get() - readSucceeded.get() - readCanceled.get()).toInt
+      (readSubmitted.get() - readSucceeded.get() - readCanceled.get() - readErrored.get()).toInt
     def totalReadOperationsSubmittedCount(): Long = readSubmitted.get()
     def totalReadOperationsSucceededCount(): Long = readSucceeded.get()
-    def totalReadOperationsErroredCount(): Long = 0L
+    def totalReadOperationsErroredCount(): Long = readErrored.get()
     def totalReadOperationsCanceledCount(): Long = readCanceled.get()
 
     def writeOperationsOutstandingCount(): Int =
-      (writeSubmitted.get() - writeSucceeded.get() - writeCanceled.get()).toInt
+      (writeSubmitted.get() - writeSucceeded.get() - writeCanceled.get() - writeErrored
+        .get()).toInt
     def totalWriteOperationsSubmittedCount(): Long = writeSubmitted.get()
     def totalWriteOperationsSucceededCount(): Long = writeSucceeded.get()
-    def totalWriteOperationsErroredCount(): Long = 0L
+    def totalWriteOperationsErroredCount(): Long = writeErrored.get()
     def totalWriteOperationsCanceledCount(): Long = writeCanceled.get()
 
     def operationsOutstandingCount(): Int =
@@ -377,7 +380,8 @@ private[effect] object EventLoop {
       totalReadOperationsSubmittedCount() + totalWriteOperationsSubmittedCount()
     def totalOperationsSucceededCount(): Long =
       totalReadOperationsSucceededCount() + totalWriteOperationsSucceededCount()
-    def totalOperationsErroredCount(): Long = 0L
+    def totalOperationsErroredCount(): Long =
+      totalReadOperationsErroredCount() + totalWriteOperationsErroredCount()
     def totalOperationsCanceledCount(): Long =
       totalReadOperationsCanceledCount() + totalWriteOperationsCanceledCount()
 
