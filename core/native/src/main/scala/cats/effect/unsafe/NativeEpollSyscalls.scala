@@ -100,11 +100,10 @@ private[unsafe] final class NativeEpollSyscalls(val maxEvents: Int, nanosecondTi
   def eventData(i: Int): Long =
     !(events + (i.toLong * EventSize + DataOffset)).asInstanceOf[Ptr[Long]]
 
-  def eventfdSignal(fd: Int): Unit = {
+  def eventfdSignal(fd: Int): Boolean = {
     val buf = stackalloc[Long]()
     !buf = 1L
-    unistd.write(fd, buf, 8.toCSize)
-    ()
+    unistd.write(fd, buf, 8.toCSize) == 8
   }
 
   def eventfdDrain(fd: Int): Unit = {

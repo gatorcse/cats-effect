@@ -70,7 +70,7 @@ private[effect] final class EpollBackend(sys: EpollSyscalls) extends EventLoopBa
                                                       else 0)
   }
 
-  def wake(): Unit = sys.eventfdSignal(wakeFd)
+  def wake(): Boolean = sys.eventfdSignal(wakeFd)
 
   /**
    * epoll has no events other than handles' and the wake-up.

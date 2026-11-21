@@ -66,12 +66,17 @@ class KqueueOneShotSuite extends FunSuite with FfmPollerTestPlatform with FfmKqu
       assert(b.cancelOneShot(id))
       assert(!b.cancelOneShot(id), "canceled twice")
       writeUnsafe(w, Array[Byte](1))
-      drain(p)
+      // nothing at all is reported: the kernel entry is gone, not just ignored
+      assertEquals(p.poll(0), PollResult.Interrupted, "the canceled one-shot's entry lingered")
       assertEquals(result.get(), null)
+      // and a handle on the pair gets a plain EV_CLEAR filter: an edge per write, not one shot
       val h = p.register(r, reads = true, writes = false).fold(throw _, identity)
+      drain(p)
+      val first = h.readReadyCount
+      assertEquals(first, 1)
       writeUnsafe(w, Array[Byte](2))
       drain(p)
-      assertEquals(h.readReadyCount, 1, "the canceled one-shot's entry lingered")
+      assertEquals(h.readReadyCount, first + 1)
     }
   }
 

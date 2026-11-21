@@ -104,10 +104,8 @@ private[ffm] final class FfmEpollSyscalls(val maxEvents: Int, nanosecondTimeouts
       Epoll.JAVA_LONG_UNALIGNED,
       i * Epoll.EPOLL_EVENT_SIZE + Epoll.EPOLL_EVENT_DATA_OFFSET)
 
-  def eventfdSignal(fd: Int): Unit = {
-    Libc.write(Libc.capture(), fd, One, 8L)
-    ()
-  }
+  def eventfdSignal(fd: Int): Boolean =
+    Libc.write(Libc.capture(), fd, One, 8L) == 8L
 
   def eventfdDrain(fd: Int): Unit = {
     Libc.read(cap, fd, drainBuf, 8L)

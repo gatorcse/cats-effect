@@ -6,4 +6,7 @@ print("| server | scenario | rps | p50 us | p99 us | p99.9 us |")
 print("|---|---|---:|---:|---:|---:|")
 for line in open(sys.argv[1]):
     r = json.loads(line)
+    if "error" in r:
+        print(f"| {r.get('server', '?')} | {r.get('scenario', '?')} | failed: {r['error']} | | | |")
+        continue
     print(f"| {r['server']} | {r['scenario']} | {r['rps']:.0f} | {r['p50_us']} | {r['p99_us']} | {r['p999_us']} |")

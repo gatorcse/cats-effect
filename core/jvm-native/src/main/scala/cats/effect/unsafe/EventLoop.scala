@@ -203,7 +203,9 @@ private[effect] object EventLoop {
     private[effect] def interrupt(): Unit =
       if (!wakeupPending.get() && wakeupPending.compareAndSet(false, true)) whileOpen {
         wakeupWrites.incrementAndGet()
-        backend.wake()
+        // if the signal failed, a later interrupt() must not be debounced against it, or the
+        // owner could sleep through every wake-up until some other event arrives
+        if (!backend.wake()) wakeupPending.set(false)
       }
 
     /**

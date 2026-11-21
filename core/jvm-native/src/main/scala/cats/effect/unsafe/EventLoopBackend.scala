@@ -69,9 +69,10 @@ private[effect] trait EventLoopBackend {
   def eventReadiness(i: Int): Int
 
   /**
-   * Signals the wake-up source. Any thread, but never after [[close]].
+   * Signals the wake-up source. Any thread, but never after [[close]]. Returns false if the
+   * signal could not be sent, so that the caller can try again on the next wake-up.
    */
-  def wake(): Unit
+  def wake(): Boolean
 
   /**
    * Resets the wake-up source after its event was seen.

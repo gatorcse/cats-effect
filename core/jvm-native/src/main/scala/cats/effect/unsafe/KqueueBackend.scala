@@ -121,10 +121,8 @@ private[effect] final class KqueueBackend(sys: KqueueSyscalls) extends EventLoop
       else 0
     }
 
-  def wake(): Unit = {
-    sys.keventChange(kq, 0L, sys.userFilter, 0, NOTE_TRIGGER, WakeupId)
-    ()
-  }
+  def wake(): Boolean =
+    sys.keventChange(kq, 0L, sys.userFilter, 0, NOTE_TRIGGER, WakeupId) == 0
 
   /**
    * Nothing to do: the `EVFILT_USER` event is `EV_CLEAR`, so reporting it reset it.
