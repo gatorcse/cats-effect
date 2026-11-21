@@ -66,31 +66,36 @@ public final class Libc {
   public static final String ARCH = System.getProperty("os.arch", "").toLowerCase();
 
   public static final boolean IS_LINUX = OS.startsWith("linux");
+  public static final boolean IS_MAC = OS.startsWith("mac") || OS.startsWith("darwin");
   public static final boolean IS_X86_64 = ARCH.equals("amd64") || ARCH.equals("x86_64");
   public static final boolean IS_AARCH64 = ARCH.equals("aarch64") || ARCH.equals("arm64");
 
-  // --- errno values (Linux generic) ------------------------------------------------------------
+  // --- errno values (Linux generic, macOS where they differ) -----------------------------------
 
   public static final int EPERM = 1;
   public static final int ENOENT = 2;
   public static final int EINTR = 4;
   public static final int EBADF = 9;
-  public static final int EAGAIN = 11;
+  public static final int EAGAIN = IS_MAC ? 35 : 11;
   public static final int EINVAL = 22;
-  public static final int ENOSYS = 38;
+  public static final int ENOSYS = IS_MAC ? 78 : 38;
 
   // --- flags -----------------------------------------------------------------------------------
 
-  public static final int O_NONBLOCK = 0x800;
-  public static final int O_CLOEXEC = 0x80000;
+  public static final int O_NONBLOCK = IS_MAC ? 0x4 : 0x800;
+  public static final int O_CLOEXEC = IS_MAC ? 0x1000000 : 0x80000;
+  public static final int F_SETFD = 2;
+  public static final int FD_CLOEXEC = 1;
   public static final int F_GETFL = 3;
   public static final int F_SETFL = 4;
 
   public static final int AF_UNIX = 1;
   public static final int AF_INET = 2;
   public static final int SOCK_STREAM = 1;
-  public static final int SOCK_NONBLOCK = O_NONBLOCK;
-  public static final int SOCK_CLOEXEC = O_CLOEXEC;
+  /** Linux only; 0 on macOS, which needs {@code fcntl} instead. */
+  public static final int SOCK_NONBLOCK = IS_MAC ? 0 : O_NONBLOCK;
+  /** Linux only; 0 on macOS, which needs {@code fcntl} instead. */
+  public static final int SOCK_CLOEXEC = IS_MAC ? 0 : O_CLOEXEC;
   public static final int EPIPE = 32;
 
   // --- linker plumbing -------------------------------------------------------------------------
@@ -165,7 +170,9 @@ public final class Libc {
           FunctionDescriptor.of(JAVA_INT, JAVA_INT, JAVA_INT, JAVA_INT),
           Linker.Option.firstVariadicArg(2),
           CAPTURE);
-  private static final MethodHandle pipe2 = bind("pipe2", I_PI, CAPTURE);
+  /** Not on macOS; {@code null} there. */
+  private static final MethodHandle pipe2 = bindOptional("pipe2", I_PI, CAPTURE);
+  private static final MethodHandle pipe = bind("pipe", FunctionDescriptor.of(JAVA_INT, ADDRESS), CAPTURE);
   private static final MethodHandle socketpair = bind("socketpair", I_IIIP_SP, CAPTURE);
   private static final MethodHandle socket = bind("socket", I_III, CAPTURE);
   private static final MethodHandle shutdown = bind("shutdown", I_II, CRITICAL, CAPTURE);
@@ -195,7 +202,17 @@ public final class Libc {
   }
 
   /** {@code fds} must hold two ints. */
+  public static int pipe(MemorySegment cap, MemorySegment fds) {
+    try {
+      return (int) pipe.invokeExact(cap, fds);
+    } catch (Throwable t) {
+      throw rethrow(t);
+    }
+  }
+
+  /** {@code fds} must hold two ints. Linux only. */
   public static int pipe2(MemorySegment cap, MemorySegment fds, int flags) {
+    if (pipe2 == null) throw new UnsupportedOperationException("pipe2 is not available here");
     try {
       return (int) pipe2.invokeExact(cap, fds, flags);
     } catch (Throwable t) {

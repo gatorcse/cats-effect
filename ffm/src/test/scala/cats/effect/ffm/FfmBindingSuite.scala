@@ -27,6 +27,7 @@ import munit.FunSuite
 class FfmBindingSuite extends FunSuite {
 
   test("epoll_event matches the platform ABI") {
+    assume(Libc.IS_LINUX, "epoll is Linux-only")
     if (Libc.IS_X86_64) {
       assertEquals(Epoll.EPOLL_EVENT_SIZE, 12L)
       assertEquals(Epoll.EPOLL_EVENT_DATA_OFFSET, 4L)

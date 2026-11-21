@@ -20,7 +20,8 @@ package ffm
 import cats.effect.unsafe.{PollingSystem, SelectorSystem}
 
 /**
- * Picks the best FFM polling system for this platform, falling back to the default
+ * Picks the best FFM polling system for this platform (epoll on Linux, kqueue on macOS), falling
+ * back to the default
  * `SelectorSystem` when it cannot be used:
  *
  * {{{
@@ -61,7 +62,7 @@ object FfmPollingSystem {
    */
   def select(): Either[Unavailable, PollingSystem] =
     availability.flatMap { _ =>
-      try Right(FfmEpollSystem())
+      try Right(if (isLinux) FfmEpollSystem() else FfmKqueueSystem())
       catch {
         case t: Throwable => Left(Unavailable(s"epoll initialization failed: $t"))
       }
@@ -72,6 +73,7 @@ object FfmPollingSystem {
    */
   lazy val availability: Either[Unavailable, Unit] = {
     val os = System.getProperty("os.name", "")
+    val lowerOs = os.toLowerCase
     val arch = System.getProperty("os.arch", "")
     val supportedArch = Set("amd64", "x86_64", "aarch64", "arm64")
     val feature = Runtime.version().feature()
@@ -79,8 +81,8 @@ object FfmPollingSystem {
     if (feature < 25)
       Left(Unavailable(
         s"JDK $feature; cats-effect-ffm needs JDK 25+ (critical downcalls with errno capture)"))
-    else if (!os.toLowerCase.startsWith("linux"))
-      Left(Unavailable(s"no FFM polling system for $os yet (epoll needs Linux)"))
+    else if (!lowerOs.startsWith("linux") && !lowerOs.startsWith("mac"))
+      Left(Unavailable(s"no FFM polling system for $os yet (epoll on Linux, kqueue on macOS)"))
     else if (!supportedArch(arch.toLowerCase))
       Left(Unavailable(s"unsupported architecture $arch"))
     else if (!nativeAccessEnabled)
@@ -91,9 +93,12 @@ object FfmPollingSystem {
       try {
         // forces linking of every binding; fails fast on a missing symbol
         val cap = internal.Libc.capture()
-        val fd = internal.Epoll.epollCreate1(cap, internal.Epoll.EPOLL_CLOEXEC)
+        val (name, fd) =
+          if (lowerOs.startsWith("linux"))
+            ("epoll_create1", internal.Epoll.epollCreate1(cap, internal.Epoll.EPOLL_CLOEXEC))
+          else ("kqueue", internal.Kqueue.kqueue(cap))
         if (fd < 0)
-          Left(Unavailable(s"epoll_create1 failed: errno ${internal.Libc.errno(cap)}"))
+          Left(Unavailable(s"$name failed: errno ${internal.Libc.errno(cap)}"))
         else {
           internal.Libc.close(cap, fd)
           Right(())
@@ -102,6 +107,9 @@ object FfmPollingSystem {
         case t: Throwable => Left(Unavailable(s"FFM bindings failed to load: $t"))
       }
   }
+
+  private def isLinux: Boolean =
+    System.getProperty("os.name", "").toLowerCase.startsWith("linux")
 
   /**
    * `Module.isNativeAccessEnabled`. Restricted methods are still allowed with a warning when

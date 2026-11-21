@@ -991,7 +991,19 @@ lazy val core = crossProject(JSPlatform, JVMPlatform, NativePlatform)
         "cats.effect.metrics.NativeCpuStarvationMetrics"),
       ProblemFilters.exclude[MissingClassProblem](
         "cats.effect.metrics.NativeCpuStarvationMetrics$"),
-      // EpollSystem now runs on the shared EpollEventLoop; these were all private to it
+      // KqueueSystem now runs on the shared EventLoop; these were all private to it
+      ProblemFilters.exclude[MissingClassProblem](
+        "cats.effect.unsafe.KqueueSystem$Kqueue$PollHandle"),
+      ProblemFilters.exclude[MissingClassProblem]("cats.effect.unsafe.KqueueSystem$event$"),
+      ProblemFilters.exclude[MissingClassProblem](
+        "cats.effect.unsafe.KqueueSystem$event$awaiting$"),
+      ProblemFilters.exclude[MissingClassProblem](
+        "cats.effect.unsafe.KqueueSystem$event$immediate$"),
+      ProblemFilters.exclude[MissingClassProblem](
+        "cats.effect.unsafe.KqueueSystem$eventImplicits$"),
+      ProblemFilters.exclude[MissingClassProblem](
+        "cats.effect.unsafe.KqueueSystem$eventImplicits$kevent64_sOps"),
+      // EpollSystem now runs on the shared EventLoop; these were all private to it
       ProblemFilters.exclude[MissingClassProblem](
         "cats.effect.unsafe.EpollSystem$FileDescriptorPollerImpl"),
       ProblemFilters.exclude[MissingClassProblem]("cats.effect.unsafe.EpollSystem$PollHandle"),
@@ -1065,7 +1077,7 @@ lazy val tests: CrossProject = crossProject(JSPlatform, JVMPlatform, NativePlatf
   .nativeSettings(
     Compile / mainClass := Some("catseffect.examples.NativeRunner"),
     // the poller contract shared with cats-effect-ffm
-    Test / unmanagedSourceDirectories += (LocalRootProject / baseDirectory).value / "tests" / "epoll" / "src" / "test" / "scala",
+    Test / unmanagedSourceDirectories += (LocalRootProject / baseDirectory).value / "tests" / "eventloop" / "src" / "test" / "scala",
     nativeTestSettings
   )
 
@@ -1295,9 +1307,16 @@ lazy val ffm = project
     Compile / doc / sources := Nil,
     Test / fork := true,
     Test / javaOptions += "--enable-native-access=ALL-UNNAMED",
+    // on Linux, also run the kqueue suites against libkqueue when it is installed
+    Test / javaOptions ++= Seq(
+      "/usr/lib/x86_64-linux-gnu/libkqueue.so.0",
+      "/usr/lib/aarch64-linux-gnu/libkqueue.so.0")
+      .find(path => new java.io.File(path).exists())
+      .map(path => s"-Dcats.effect.ffm.kqueueLibrary=$path")
+      .toSeq,
     // the FFM bindings are restricted methods by design; JDK 25 javac warns on every one
     javacOptions += "-Xlint:-restricted",
-    Test / unmanagedSourceDirectories += (LocalRootProject / baseDirectory).value / "tests" / "epoll" / "src" / "test" / "scala",
+    Test / unmanagedSourceDirectories += (LocalRootProject / baseDirectory).value / "tests" / "eventloop" / "src" / "test" / "scala",
     libraryDependencies += "org.scalameta" %% "munit" % MUnitVersion % Test
   )
 

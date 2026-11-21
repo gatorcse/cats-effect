@@ -18,10 +18,10 @@ package cats.effect
 package unsafe
 
 /**
- * The Scala Native epoll polling system. The event loop is `EpollEventLoop`, shared with the
- * JVM's `cats-effect-ffm` module; this object supplies the `@extern` syscalls.
+ * The Scala Native epoll polling system. The event loop is `EventLoop`, shared with the JVM's
+ * `cats-effect-ffm` module; this object supplies the `@extern` syscalls.
  */
-object EpollSystem extends EpollPollingSystem {
+object EpollSystem extends EventLoopPollingSystem {
 
   private[this] final val MaxEvents = WorkStealingThreadPoolConstants.PollingTicks
 
@@ -50,5 +50,5 @@ object EpollSystem extends EpollPollingSystem {
     super.metrics(poller)
 
   final class Poller private[EpollSystem] (sys: EpollSyscalls)
-      extends EpollEventLoop.Poller(sys)
+      extends EventLoop.Poller(new EpollBackend(sys))
 }

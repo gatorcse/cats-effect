@@ -23,24 +23,19 @@ import java.io.IOException
 import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.atomic.{AtomicBoolean, AtomicInteger, AtomicLong, AtomicReference}
 
-import EpollConstants._
+import EventLoopBackend.{Readable, WakeupId, Writable}
 
 /**
- * The epoll event loop shared by the JVM (`cats-effect-ffm`'s `FfmEpollSystem`) and Scala
- * Native (`EpollSystem`): handle table, wake-ups, lifecycle and event dispatch. It calls the OS
- * only through [[EpollSyscalls]].
+ * The event loop shared by every edge-triggered backend (epoll and kqueue) on the JVM
+ * (`cats-effect-ffm`) and Scala Native: handle table, wake-ups, lifecycle and event dispatch.
+ * It reaches the OS only through an [[EventLoopBackend]].
  */
-private[effect] object EpollEventLoop {
-
-  /**
-   * `epoll_data` of the poller's own wake-up eventfd. Never a valid handle id.
-   */
-  private final val WakeupId = -1L
+private[effect] object EventLoop {
 
   private def errnoException(op: String, errno: Int): IOException =
     new IOException(s"$op failed: errno $errno")
 
-  final class PollHandle private[EpollEventLoop] (
+  final class PollHandle private[EventLoop] (
       val poller: Poller,
       val fd: Int,
       val slot: Int,
@@ -69,10 +64,13 @@ private[effect] object EpollEventLoop {
     /**
      * Called by the owning poller's thread with the event flags.
      */
-    private[EpollEventLoop] def notify(events: Int): Unit = {
-      if (reads && (events & ReadWake) != 0) readState.fire()
-      if (writes && (events & WriteWake) != 0) writeState.fire()
+    private[EventLoop] def notify(readiness: Int): Unit = {
+      if (reads && (readiness & Readable) != 0) readState.fire()
+      if (writes && (readiness & Writable) != 0) writeState.fire()
     }
+
+    private[EventLoop] def wantsReads: Boolean = reads
+    private[EventLoop] def wantsWrites: Boolean = writes
 
     def awaitReadReady(seen: Int): IO[Int] = readState.await(seen)
 
@@ -154,37 +152,16 @@ private[effect] object EpollEventLoop {
       }
   }
 
-  private final val ReadWake = EPOLLIN | EPOLLRDHUP | EPOLLHUP | EPOLLERR
-  // not RDHUP: a peer that stopped writing can still be written to
-  private final val WriteWake = EPOLLOUT | EPOLLHUP | EPOLLERR
-
   /**
-   * Generations use 31 bits so that no id is ever [[WakeupId]].
+   * Generations use 31 bits so that every handle id is non-negative; negative ids belong to the
+   * backend ([[EventLoopBackend.WakeupId]] and [[EventLoopBackend.dispatchOther]]).
    */
   private final val GenerationMask = 0x7fffffff
 
-  class Poller private[effect] (sys: EpollSyscalls) extends PollerMetrics {
+  class Poller private[effect] (backend: EventLoopBackend) extends PollerMetrics {
 
-    private[this] val maxEvents = sys.maxEvents
+    private[this] val maxEvents = backend.maxEvents
     private[this] var readyEventCount: Int = 0
-
-    private[this] val epfd: Int =
-      try sys.epollCreate()
-      catch { case t: Throwable => sys.release(); throw t }
-
-    private[this] val wakeFd: Int = {
-      val fd =
-        try sys.eventfdCreate()
-        catch { case t: Throwable => sys.close(epfd); sys.release(); throw t }
-      val err = sys.epollAdd(epfd, fd, EPOLLIN | EPOLLET, WakeupId)
-      if (err != 0) {
-        sys.close(fd)
-        sys.close(epfd)
-        sys.release()
-        throw errnoException("epoll_ctl(eventfd)", err)
-      }
-      fd
-    }
 
     // --- lifecycle: open while >= 0; close() adds Int.MinValue and waits for in-flight users --
 
@@ -206,9 +183,7 @@ private[effect] object EpollEventLoop {
     private[effect] def close(): Unit = {
       if (inFlight.getAndAdd(Int.MinValue) >= 0) {
         while (inFlight.get() != Int.MinValue) Thread.`yield`()
-        sys.close(wakeFd)
-        sys.close(epfd)
-        sys.release()
+        backend.close()
       }
     }
 
@@ -222,11 +197,11 @@ private[effect] object EpollEventLoop {
     private[effect] def interrupt(): Unit =
       if (!wakeupPending.get() && wakeupPending.compareAndSet(false, true)) whileOpen {
         wakeupWrites.incrementAndGet()
-        sys.eventfdSignal(wakeFd)
+        backend.wake()
       }
 
     /**
-     * Number of eventfd writes so far; for tests of wake-up debouncing.
+     * Number of wake-up signals (eventfd writes, EVFILT_USER triggers) so far; for tests.
      */
     private[effect] def wakeupWriteCount: Long = wakeupWrites.get()
 
@@ -282,14 +257,11 @@ private[effect] object EpollEventLoop {
       val slot = allocateSlot()
       val id = (generations(slot).toLong << 32) | (slot.toLong & 0xffffffffL)
       val handle = new PollHandle(this, fd, slot, id, reads, writes)
-      val interest = EPOLLET |
-        (if (reads) EPOLLIN | EPOLLRDHUP else 0) |
-        (if (writes) EPOLLOUT else 0)
-      val err = sys.epollAdd(epfd, fd, interest, id)
+      val err = backend.add(fd, reads, writes, id)
       if (err != 0) {
         freeSlots(freeCount) = slot // never published, generation unchanged
         freeCount += 1
-        Left(errnoException(s"epoll_ctl(ADD, fd $fd)", err))
+        Left(errnoException(s"${backend.name} registration of fd $fd", err))
       } else {
         handles(slot) = handle
         registered.incrementAndGet()
@@ -302,7 +274,7 @@ private[effect] object EpollEventLoop {
         registered.decrementAndGet()
         whileOpen {
           // thread-safe; ENOENT/EBADF if the fd was already closed, which is fine
-          sys.epollDel(epfd, handle.fd)
+          backend.remove(handle.fd, handle.wantsReads, handle.wantsWrites)
         }
         pendingFree.offer(handle)
         ()
@@ -311,7 +283,7 @@ private[effect] object EpollEventLoop {
     // --- polling -------------------------------------------------------------------------------
 
     private[effect] def poll(nanos: Long): PollResult = {
-      val rtn = sys.epollWait(epfd, nanos)
+      val rtn = backend.poll(nanos)
 
       if (rtn > 0) {
         readyEventCount = rtn
@@ -320,8 +292,9 @@ private[effect] object EpollEventLoop {
         PollResult.Interrupted
       } else {
         val err = -rtn
-        if (err == EINTR) PollResult.Interrupted // the worker recomputes its deadline
-        else throw errnoException("epoll_wait", err)
+        if (err == EventLoopBackend.EINTR)
+          PollResult.Interrupted // the worker recomputes its deadline
+        else throw errnoException(s"${backend.name} wait", err)
       }
     }
 
@@ -329,17 +302,19 @@ private[effect] object EpollEventLoop {
       var fibersRescheduled = false
       var i = 0
       while (i < readyEventCount) {
-        val flags = sys.eventFlags(i)
-        val id = sys.eventData(i)
+        val id = backend.eventId(i)
         if (id == WakeupId) {
           // Drain first, then re-arm. The other order loses a wake-up: an interrupt between
           // the reset and the drain writes, the drain eats its write, and the flag stays set,
           // so every later interrupt is skipped while the owner parks. An interrupt that falls
           // between the drain and the reset is skipped, which is fine: the owner is awake and
-          // looks for work before it parks again. The eventfd is edge-triggered, so a write
-          // that lands after this batch is reported by the next poll.
-          sys.eventfdDrain(wakeFd)
+          // looks for work before it parks again. The wake-up source is edge-triggered, so a
+          // signal that lands after this batch is reported by the next poll.
+          backend.clearWake()
           wakeupPending.set(false)
+        } else if (id < 0) {
+          // not a handle: a backend-specific event (e.g. a one-shot kqueue filter)
+          if (backend.dispatchOther(i, id)) fibersRescheduled = true
         } else {
           val slot = id.toInt
           val generation = (id >>> 32).toInt
@@ -347,7 +322,7 @@ private[effect] object EpollEventLoop {
             val handle = handles(slot)
             // drop events for removed registrations and for reused slots
             if ((handle ne null) && !handle.deregistered && generations(slot) == generation) {
-              handle.notify(flags)
+              handle.notify(backend.eventReadiness(i))
               fibersRescheduled = true
             }
           }
@@ -359,7 +334,7 @@ private[effect] object EpollEventLoop {
       fibersRescheduled
     }
 
-    private[effect] def needsPoll(): Boolean = registered.get() > 0
+    private[effect] def needsPoll(): Boolean = registered.get() > 0 || backend.hasOther
 
     /**
      * Internal state, for test failure messages.
@@ -418,6 +393,6 @@ private[effect] object EpollEventLoop {
     def totalConnectOperationsErroredCount(): Long = 0L
     def totalConnectOperationsCanceledCount(): Long = 0L
 
-    override def toString: String = "Epoll"
+    override def toString: String = backend.name
   }
 }

@@ -18,22 +18,39 @@ package cats.effect
 package unsafe
 
 /**
- * What the shared poller contract suites need from a platform: a way to build the epoll syscall
- * layer, and a handful of raw, non-blocking fd operations. The JVM implements it with FFM
- * (`cats-effect-ffm`), Scala Native with `@extern`.
+ * What the shared poller contract suites need from a platform: one event-loop backend to test
+ * (epoll or kqueue), and a handful of raw, non-blocking fd operations. The JVM implements it
+ * with FFM (`cats-effect-ffm`), Scala Native with `@extern`.
  */
 trait PollerTestPlatform {
 
   /**
-   * True where the epoll backend exists (Linux). The runtime contract runs everywhere.
+   * "epoll" or "kqueue", for test names.
    */
-  def epollSupported: Boolean
+  def backendName: String
 
-  def epollPwait2Available: Boolean
+  /**
+   * True where this backend can run here. Suites for other backends are skipped.
+   */
+  def backendSupported: Boolean
 
-  def makeSyscalls(maxEvents: Int, nanosecondTimeouts: Boolean): EpollSyscalls
+  /**
+   * Whether timed waits can be in nanoseconds (`epoll_pwait2`; always for kqueue).
+   */
+  def nanosecondTimeoutsAvailable: Boolean
 
-  def epollSystem(): EpollPollingSystem
+  def makeBackend(maxEvents: Int, nanosecondTimeouts: Boolean): EventLoopBackend
+
+  /**
+   * True when the backend is emulated (kqueue through libkqueue on Linux), which does not model
+   * every socket state; the few cases that depend on one are skipped.
+   */
+  def emulated: Boolean = false
+
+  /**
+   * A polling system over this backend, for the `interrupt` contract.
+   */
+  def pollingSystem(): PollingSystem { type Poller <: EventLoop.Poller }
 
   /**
    * The polling system for the runtime contract; `None` uses the platform default.

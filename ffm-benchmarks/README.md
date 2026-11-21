@@ -52,3 +52,17 @@ WARMUP=10 DURATION=15 ffm-benchmarks/loadgen/bench.py \
 and `runserver.sh` in `/opt/tools`; see the harness for the exact JVM flags). Per message, it
 reports throughput, latency percentiles, server CPU time, heap allocation, read/write syscalls
 from `/proc/<pid>/io` and voluntary context switches.
+
+### macOS (kqueue)
+
+`bench.py` is Linux-only. `loadgen/portable-echo.sh` runs a shorter, unpinned comparison of the
+Scala Native echo server (kqueue on macOS) against tokio, with the same `echoload` client (which
+uses kqueue there), and `loadgen/summary.py` prints its results as a table. The `FFM and Native
+polling` workflow runs both on a `macos-latest` runner and attaches the results; shared runners
+are noisy, so compare servers within one run.
+
+```sh
+sbt "++2.13; nativeBenchmarks/nativeLink"
+cargo build --release --manifest-path ffm-benchmarks/tokio-echo/Cargo.toml
+ffm-benchmarks/loadgen/portable-echo.sh echo-macos.jsonl native tokio
+```

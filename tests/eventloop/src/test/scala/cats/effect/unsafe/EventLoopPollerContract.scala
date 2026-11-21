@@ -25,32 +25,32 @@ import java.util.concurrent.atomic.AtomicReference
 import munit.FunSuite
 
 /**
- * Contract tests that drive one epoll poller directly, without a runtime, so that event
- * batches, wake-ups and timeouts can be observed exactly. Each case names the Netty issue it
- * guards. The same cases run on the JVM (FFM) and on Scala Native (`@extern`).
+ * Contract tests that drive one event-loop poller (epoll or kqueue) directly, without a
+ * runtime, so that event batches, wake-ups and timeouts can be observed exactly. Each case
+ * names the Netty issue it guards. The same cases run on the JVM (FFM) and on Scala Native
+ * (`@extern`).
  */
-abstract class EpollPollerContract extends FunSuite with PollerTestPlatform {
+abstract class EventLoopPollerContract extends FunSuite with PollerTestPlatform {
 
-  override def munitIgnore: Boolean = !epollSupported
+  override def munitIgnore: Boolean = !backendSupported
 
-  def withPoller[A](maxEvents: Int = 64, nanos: Boolean = true)(
-      f: EpollEventLoop.Poller => A): A = {
-    val poller = newPoller(maxEvents, nanos && epollPwait2Available)
+  def withPoller[A](maxEvents: Int = 64, nanos: Boolean = true)(f: EventLoop.Poller => A): A = {
+    val poller = newPoller(maxEvents, nanos && nanosecondTimeoutsAvailable)
     try f(poller)
     finally poller.close()
   }
 
-  def newPoller(maxEvents: Int = 64, nanos: Boolean = false): EpollEventLoop.Poller =
-    new EpollEventLoop.Poller(makeSyscalls(maxEvents, nanos))
+  def newPoller(maxEvents: Int = 64, nanos: Boolean = false): EventLoop.Poller =
+    new EventLoop.Poller(makeBackend(maxEvents, nanos))
 
-  def register(p: EpollEventLoop.Poller, fd: Int, reads: Boolean, writes: Boolean) =
+  def register(p: EventLoop.Poller, fd: Int, reads: Boolean, writes: Boolean) =
     p.register(fd, reads, writes).fold(throw _, identity)
 
   /**
    * Runs `poll` on another thread; the reference holds (result, elapsed nanos).
    */
   def pollOnThread(
-      p: EpollEventLoop.Poller,
+      p: EventLoop.Poller,
       nanos: Long): (AtomicReference[(PollResult, Long)], CountDownLatch) = {
     val result = new AtomicReference[(PollResult, Long)]
     val done = new CountDownLatch(1)
@@ -127,7 +127,7 @@ abstract class EpollPollerContract extends FunSuite with PollerTestPlatform {
   }
 
   test("an interrupt naming a stale owner thread still wakes the poller (blocking handoff)") {
-    val system = epollSystem()
+    val system = pollingSystem()
     val p = system.makePoller()
     try {
       // after an IO.blocking handoff the pool may still name the old thread, which is the caller
@@ -269,6 +269,7 @@ abstract class EpollPollerContract extends FunSuite with PollerTestPlatform {
   }
 
   test("an unconnected socket does not cause an EPOLLHUP storm (netty#16250)") {
+    assume(!emulated, "libkqueue rejects unconnected sockets (EFAULT)")
     withPoller() { p =>
       val fd = unconnectedTcpSocket()
       try {

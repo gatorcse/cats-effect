@@ -134,7 +134,7 @@ object EchoServer extends IOApp {
     }
 
   /**
-   * The hint needs the epoll handle's ready counters; kqueue (macOS) has none.
+   * The hint needs the ready counters of the shared event loop (epoll and kqueue).
    */
   private def edgeTriggered(h: FileDescriptorPollHandle): Boolean =
     h.isInstanceOf[EdgeTriggeredPollHandle]
