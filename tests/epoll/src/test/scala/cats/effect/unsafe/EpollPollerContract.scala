@@ -126,13 +126,21 @@ abstract class EpollPollerContract extends FunSuite with PollerTestPlatform {
     }
   }
 
-  test("the owner thread never wakes itself") {
+  test("an interrupt naming a stale owner thread still wakes the poller (blocking handoff)") {
     val system = epollSystem()
     val p = system.makePoller()
     try {
-      val before = p.wakeupWriteCount
+      // after an IO.blocking handoff the pool may still name the old thread, which is the caller
+      // here, while the replacement thread is the one parked on this poller
+      val (result, done) = pollOnThread(p, -1)
+      Thread.sleep(50)
       system.interrupt(Thread.currentThread(), p)
-      assertEquals(p.wakeupWriteCount, before)
+      assert(
+        done.await(5, TimeUnit.SECONDS),
+        "wake-up skipped because the caller looked like the owner")
+      assertEquals(result.get()._1, PollResult.Complete)
+      p.processReadyEvents()
+      ()
     } finally system.closePoller(p)
   }
 

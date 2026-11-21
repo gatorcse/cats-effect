@@ -42,10 +42,13 @@ abstract class EpollPollingSystem private[effect] () extends PollingSystem {
   def needsPoll(poller: Poller): Boolean = poller.needsPoll()
 
   /**
-   * The owner thread never wakes itself: it is not parked.
+   * Always wakes the poller, even when called from `targetThread`. During an `IO.blocking`
+   * handoff the pool can still name the old, now blocking, thread as the poller's owner while
+   * its replacement is parked on the same poller; skipping "self" wake-ups would lose that
+   * wake-up. The eventfd write is debounced, so a redundant one is cheap.
    */
   def interrupt(targetThread: Thread, targetPoller: Poller): Unit =
-    if (Thread.currentThread() ne targetThread) targetPoller.interrupt()
+    targetPoller.interrupt()
 
   def metrics(poller: Poller): PollerMetrics = poller
 }
