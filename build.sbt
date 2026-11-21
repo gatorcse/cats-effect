@@ -112,7 +112,7 @@ ThisBuild / developers := List(
 val PrimaryOS = "ubuntu-latest"
 val ArmOS = "ubuntu-22.04-arm"
 val Windows = "windows-2022"
-val MacOS = "macos-14"
+val MacOS = "macos-15"
 
 val ScalaNativeLLVM = "/usr/lib/llvm-15/bin"
 val ArmNativeCI = s"matrix.ci == '${CI.Native.command}' && matrix.os == '$ArmOS'"
@@ -411,7 +411,12 @@ val undocumentedRefs =
     example.jvm,
     graalVMExample,
     tests.jvm,
-    tests.js)
+    tests.js,
+    // the polling work needs JDK 25 (ffm) or is a benchmark; keep it out of unidoc
+    ffm,
+    ffmBenchmarks,
+    nativeBenchmarks
+  )
 
 lazy val root = project
   .in(file("."))
@@ -985,7 +990,31 @@ lazy val core = crossProject(JSPlatform, JVMPlatform, NativePlatform)
       ProblemFilters.exclude[MissingClassProblem](
         "cats.effect.metrics.NativeCpuStarvationMetrics"),
       ProblemFilters.exclude[MissingClassProblem](
-        "cats.effect.metrics.NativeCpuStarvationMetrics$")
+        "cats.effect.metrics.NativeCpuStarvationMetrics$"),
+      // EpollSystem now runs on the shared EpollEventLoop; these were all private to it
+      ProblemFilters.exclude[MissingClassProblem](
+        "cats.effect.unsafe.EpollSystem$FileDescriptorPollerImpl"),
+      ProblemFilters.exclude[MissingClassProblem]("cats.effect.unsafe.EpollSystem$PollHandle"),
+      ProblemFilters.exclude[MissingClassProblem]("cats.effect.unsafe.EpollSystem$epoll"),
+      ProblemFilters.exclude[MissingClassProblem]("cats.effect.unsafe.EpollSystem$epoll$"),
+      ProblemFilters.exclude[MissingClassProblem](
+        "cats.effect.unsafe.EpollSystem$epoll$awaiting"),
+      ProblemFilters.exclude[MissingClassProblem](
+        "cats.effect.unsafe.EpollSystem$epoll$awaiting$"),
+      ProblemFilters.exclude[MissingClassProblem](
+        "cats.effect.unsafe.EpollSystem$epoll$immediate"),
+      ProblemFilters.exclude[MissingClassProblem](
+        "cats.effect.unsafe.EpollSystem$epoll$immediate$"),
+      ProblemFilters.exclude[MissingClassProblem](
+        "cats.effect.unsafe.EpollSystem$epollImplicits"),
+      ProblemFilters.exclude[MissingClassProblem](
+        "cats.effect.unsafe.EpollSystem$epollImplicits$"),
+      ProblemFilters.exclude[MissingClassProblem](
+        "cats.effect.unsafe.EpollSystem$epollImplicits$epoll_eventOps"),
+      ProblemFilters.exclude[MissingClassProblem](
+        "cats.effect.unsafe.EpollSystem$epollImplicits$epoll_eventOps$"),
+      ProblemFilters.exclude[MissingClassProblem]("cats.effect.unsafe.EpollSystem$eventfd"),
+      ProblemFilters.exclude[MissingClassProblem]("cats.effect.unsafe.EpollSystem$eventfd$")
     )
   )
 
@@ -1035,6 +1064,8 @@ lazy val tests: CrossProject = crossProject(JSPlatform, JVMPlatform, NativePlatf
   )
   .nativeSettings(
     Compile / mainClass := Some("catseffect.examples.NativeRunner"),
+    // the poller contract shared with cats-effect-ffm
+    Test / unmanagedSourceDirectories += (LocalRootProject / baseDirectory).value / "tests" / "epoll" / "src" / "test" / "scala",
     nativeTestSettings
   )
 
@@ -1246,6 +1277,65 @@ lazy val graalVMExample = project
     name := "cats-effect-graalvm-example",
     nativeImageOptions ++= Seq("--no-fallback", "-H:+ReportExceptionStackTraces"),
     nativeImageInstalled := true
+  )
+
+/**
+ * Experimental Foreign Function & Memory (Panama) polling systems. JVM-only, JDK 25+. Not part
+ * of the aggregate so the default build keeps working on older JDKs; build it explicitly with
+ * `ffm/compile` on JDK 25+.
+ */
+lazy val ffm = project
+  .in(file("ffm"))
+  .dependsOn(core.jvm, std.jvm)
+  .settings(
+    name := "cats-effect-ffm",
+    crossScalaVersions := Seq(Scala212, Scala213, Scala3),
+    tlJdkRelease := Some(25),
+    mimaPreviousArtifacts := Set.empty,
+    Compile / doc / sources := Nil,
+    Test / fork := true,
+    Test / javaOptions += "--enable-native-access=ALL-UNNAMED",
+    // the FFM bindings are restricted methods by design; JDK 25 javac warns on every one
+    javacOptions += "-Xlint:-restricted",
+    Test / unmanagedSourceDirectories += (LocalRootProject / baseDirectory).value / "tests" / "epoll" / "src" / "test" / "scala",
+    libraryDependencies += "org.scalameta" %% "munit" % MUnitVersion % Test
+  )
+
+/**
+ * Phase 0 benchmarks for the FFM polling spike: JMH downcall micro-benchmarks and echo servers.
+ */
+lazy val ffmBenchmarks = project
+  .in(file("ffm-benchmarks"))
+  .dependsOn(ffm)
+  .settings(
+    name := "cats-effect-ffm-benchmarks",
+    javacOptions += "-Xlint:-restricted",
+    crossScalaVersions := Seq(Scala212, Scala213, Scala3),
+    tlJdkRelease := Some(25),
+    fork := true,
+    run / connectInput := false,
+    javaOptions ++= Seq(
+      "--enable-native-access=ALL-UNNAMED",
+      "-Dcats.effect.tracing.mode=none",
+      "-Dcats.effect.tracing.exceptions.enhanced=false")
+  )
+  .enablePlugins(NoPublishPlugin, JmhPlugin)
+
+/**
+ * Scala Native echo server for the shared echo harness in ffm-benchmarks/loadgen. Not
+ * aggregated.
+ */
+lazy val nativeBenchmarks = project
+  .in(file("native-benchmarks"))
+  .dependsOn(core.native)
+  .enablePlugins(ScalaNativePlugin, NoPublishPlugin)
+  .settings(
+    name := "cats-effect-native-benchmarks",
+    crossScalaVersions := Seq(Scala212, Scala213, Scala3),
+    Compile / mainClass := Some("cats.effect.benchmarks.echo.EchoServer"),
+    nativeConfig ~= { c =>
+      c.withMode(Mode.releaseFast).withLTO(LTO.thin).withMultithreading(true)
+    }
   )
 
 /**
