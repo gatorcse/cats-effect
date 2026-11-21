@@ -24,6 +24,10 @@ import cats.effect.unsafe.metrics.PollerMetrics
  * epoll and with the JVM's `cats-effect-ffm` module; this object supplies the `@extern`
  * syscalls. Handles are edge-triggered (`EV_CLEAR`) and registered once, rather than one
  * one-shot filter per wait.
+ *
+ * Release a registration, and cancel an `awaitEvent`, before closing its fd: until then the
+ * poller keeps the fd number's filters claimed, and registering a new fd with that number
+ * fails.
  */
 object KqueueSystem extends PollingSystem {
 

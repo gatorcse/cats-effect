@@ -82,6 +82,29 @@ abstract class EventLoopPollerContract extends FunSuite with PollerTestPlatform 
     }
   }
 
+  test("a rejected read+write registration does not keep the direction it did claim") {
+    withPoller() { p =>
+      val (r, w) = pipe()
+      try {
+        if (emulated) {
+          // libkqueue refuses a write filter on a pipe's read end, after adding its read filter
+          assert(p.register(r, reads = true, writes = true).isLeft, "libkqueue accepted it")
+          register(p, r, reads = true, writes = false).deregister()
+        }
+        val h = register(p, w, reads = false, writes = true)
+        assert(p.register(w, reads = true, writes = true).isLeft, "duplicate accepted")
+        if (backendName == "kqueue" && !emulated) {
+          // kqueue registers per direction: the read filter alone is free, and must still be
+          val h2 = register(p, w, reads = true, writes = false)
+          h2.deregister()
+        }
+        h.deregister()
+        assertEquals(p.registrationCount, 0)
+        if (!emulated) register(p, w, reads = true, writes = true).deregister()
+      } finally { close(r); close(w) }
+    }
+  }
+
   test("N interrupts between polls cause exactly one eventfd write (netty#9191)") {
     withPoller() { p =>
       val before = p.wakeupWriteCount
