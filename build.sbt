@@ -411,7 +411,12 @@ val undocumentedRefs =
     example.jvm,
     graalVMExample,
     tests.jvm,
-    tests.js)
+    tests.js,
+    // the polling work needs JDK 25 (ffm) or is a benchmark; keep it out of unidoc
+    ffm,
+    ffmBenchmarks,
+    nativeBenchmarks
+  )
 
 lazy val root = project
   .in(file("."))
