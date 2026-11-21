@@ -38,7 +38,9 @@ private[effect] trait EventLoopBackend {
 
   /**
    * Adds `fd`, edge-triggered, for the given directions, tagged with `id`. Returns 0 or the
-   * errno; on failure nothing stays registered.
+   * errno; on failure nothing stays registered. A direction of an fd that this backend already
+   * has registered fails with EEXIST. (epoll is stricter: any second registration of the fd
+   * fails, while kqueue allows a read-only and a write-only handle on the same fd.)
    */
   def add(fd: Int, reads: Boolean, writes: Boolean, id: Long): Int
 

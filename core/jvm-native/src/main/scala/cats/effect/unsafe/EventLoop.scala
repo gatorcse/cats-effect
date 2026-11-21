@@ -189,6 +189,12 @@ private[effect] object EventLoop {
 
     def isClosed: Boolean = inFlight.get() < 0
 
+    /**
+     * Runs `f` only if the poller is open, keeping it open meanwhile. Any thread. For backend
+     * calls made off the owner thread, which must not touch a closed (and possibly reused) fd.
+     */
+    private[effect] def ifOpen(f: => Unit): Unit = whileOpen(f)
+
     // --- wake-ups ------------------------------------------------------------------------------
 
     private[this] val wakeupPending = new AtomicBoolean(false)

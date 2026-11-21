@@ -69,7 +69,8 @@ object KqueueSystem extends PollingSystem {
      * Waits for one occurrence of the `(ident, filter)` event, registered as a one-shot filter
      * with the given `flags` and `fflags`, and returns its `data`. For filters other than reads
      * and writes on a descriptor, which `registerFileDescriptor` covers. Fails if a registered
-     * handle or another pending `awaitEvent` already uses the same `(ident, filter)`.
+     * handle or another pending `awaitEvent` on the same worker's poller already uses the same
+     * `(ident, filter)`. Cancel a wait on an fd before closing the fd.
      */
     def awaitEvent(
         ident: Int,
@@ -106,9 +107,11 @@ object KqueueSystem extends PollingSystem {
             val id =
               poller.backend.addOneShot(ident, filter, flags.toInt & 0xffff, fflags, counted)
             cancelCb(Right(Some(IO {
-              if (poller.backend.cancelOneShot(id) && (canceled ne null)) {
-                canceled.incrementAndGet()
-                ()
+              poller.ifOpen {
+                if (poller.backend.cancelOneShot(id) && (canceled ne null)) {
+                  canceled.incrementAndGet()
+                  ()
+                }
               }
             })))
           }
@@ -117,5 +120,7 @@ object KqueueSystem extends PollingSystem {
   }
 
   final class Poller private[KqueueSystem] (private[KqueueSystem] val backend: KqueueBackend)
-      extends EventLoop.Poller(backend)
+      extends EventLoop.Poller(backend) {
+    override def toString: String = "Kqueue" // as before the shared event loop
+  }
 }

@@ -37,19 +37,6 @@ private[effect] final class KqueueBackend(sys: KqueueSyscalls) extends EventLoop
 
   def maxEvents: Int = sys.maxEvents
 
-  private[this] val kq: Int =
-    try sys.kqueueCreate()
-    catch { case t: Throwable => sys.release(); throw t }
-
-  {
-    val err = sys.keventChange(kq, 0L, sys.userFilter, EV_ADD | EV_CLEAR, 0, WakeupId)
-    if (err != 0) {
-      sys.close(kq)
-      sys.release()
-      throw new IOException(s"kevent(EVFILT_USER) failed: errno $err")
-    }
-  }
-
   // --- the (ident, filter) pairs in use -------------------------------------------------------
   //
   // kqueue keys an entry by (ident, filter): EV_ADD on a pair that already exists modifies it
@@ -67,6 +54,21 @@ private[effect] final class KqueueBackend(sys: KqueueSyscalls) extends EventLoop
   private[this] def unclaim(ident: Int, filter: Short): Unit = {
     claimed.remove(key(ident, filter))
     ()
+  }
+
+  private[this] val kq: Int =
+    try sys.kqueueCreate()
+    catch { case t: Throwable => sys.release(); throw t }
+
+  {
+    // claimed for good, so that awaitEvent(0, EVFILT_USER) can't take over the wake-up entry
+    claim(0, sys.userFilter)
+    val err = sys.keventChange(kq, 0L, sys.userFilter, EV_ADD | EV_CLEAR, 0, WakeupId)
+    if (err != 0) {
+      sys.close(kq)
+      sys.release()
+      throw new IOException(s"kevent(EVFILT_USER) failed: errno $err")
+    }
   }
 
   private[this] def addFilter(fd: Int, filter: Short, id: Long): Int =
@@ -136,8 +138,12 @@ private[effect] final class KqueueBackend(sys: KqueueSyscalls) extends EventLoop
 
   /**
    * Adds a one-shot `(ident, filter)` event that completes `cb` with the event's `data`. Owner
-   * thread. Fails `cb` with EEXIST if a handle or another one-shot already uses the pair.
+   * thread. Fails `cb` if a handle or another one-shot on this poller already uses the pair.
    * Returns the id to pass to [[cancelOneShot]].
+   *
+   * If `ident` is an fd that is closed while the one-shot waits, the kernel drops the entry and
+   * the wait never completes; until it is canceled, it keeps the pair claimed, so registering a
+   * new fd with the same number on this poller fails. Cancel waits on fds before closing them.
    */
   private[unsafe] def addOneShot(
       ident: Int,
@@ -162,8 +168,9 @@ private[effect] final class KqueueBackend(sys: KqueueSyscalls) extends EventLoop
 
   /**
    * Cancels a one-shot event that has not fired: removes it from the kqueue, so that it neither
-   * fires later nor lingers for the next user of the pair. Any thread. Returns false if it had
-   * already completed.
+   * fires later nor lingers for the next user of the pair. Any thread, but only while the
+   * poller is open (see `EventLoop.Poller.ifOpen`): after close the kqueue's fd number may
+   * belong to another kqueue. Returns false if it had already completed.
    */
   private[unsafe] def cancelOneShot(id: Long): Boolean = {
     val os = oneShots.remove(id)

@@ -21,6 +21,7 @@ import org.typelevel.scalaccompat.annotation._
 
 import scala.scalanative.libc.errno._
 import scala.scalanative.libc.stdlib
+import scala.scalanative.posix.fcntl
 import scala.scalanative.posix.string._
 import scala.scalanative.posix.unistd
 import scala.scalanative.unsafe._
@@ -52,6 +53,12 @@ private[unsafe] final class NativeKqueueSyscalls(val maxEvents: Int) extends Kqu
   def kqueueCreate(): Int = {
     val fd = kq.kqueue()
     if (fd < 0) throw new IOException(s"kqueue failed: ${fromCString(strerror(errno))}")
+    // kqueues are not inherited by fork()ed children, but exec without fork would keep it
+    if (fcntl.fcntl(fd, fcntl.F_SETFD, fcntl.FD_CLOEXEC) < 0) {
+      val err = errno
+      unistd.close(fd)
+      throw new IOException(s"fcntl(FD_CLOEXEC) failed: ${fromCString(strerror(err))}")
+    }
     fd
   }
 

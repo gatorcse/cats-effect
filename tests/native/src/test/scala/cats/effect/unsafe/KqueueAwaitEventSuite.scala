@@ -38,9 +38,14 @@ class KqueueAwaitEventSuite
   private[this] var _runtime: IORuntime = _
   implicit def runtime: IORuntime = _runtime
 
+  // one worker, so that every step of a test reaches the same poller (claims are per poller)
   override def beforeAll(): Unit =
-    if (LinktimeInfo.isMac)
-      _runtime = IORuntime.builder().setPollingSystem(KqueueSystem).build()
+    if (LinktimeInfo.isMac) {
+      val (compute, api, shutdown) =
+        IORuntime.createWorkStealingComputeThreadPool(threads = 1, pollingSystem = KqueueSystem)
+      _runtime =
+        IORuntime.builder().setCompute(compute, shutdown).addPoller(api, () => ()).build()
+    }
 
   override def afterAll(): Unit = if (_runtime ne null) _runtime.shutdown()
 

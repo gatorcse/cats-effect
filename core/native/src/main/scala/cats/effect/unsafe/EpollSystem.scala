@@ -50,5 +50,7 @@ object EpollSystem extends EventLoopPollingSystem {
     super.metrics(poller)
 
   final class Poller private[EpollSystem] (sys: EpollSyscalls)
-      extends EventLoop.Poller(new EpollBackend(sys))
+      extends EventLoop.Poller(new EpollBackend(sys)) {
+    override def toString: String = "Epoll" // as before the shared event loop
+  }
 }

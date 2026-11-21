@@ -47,9 +47,10 @@ abstract class EventLoopPollingSystem private[effect] () extends PollingSystem {
    * `notifyParked` scans every index, its own included. If it picks itself, it marks itself
    * awake and interrupts its own poller, then goes on to `poll(-1)`. Skipping that "self"
    * wake-up left it parked forever with nothing to wake it (its signal is already `Unparked`).
-   * The eventfd write stays readable, so the next poll returns at once; it is debounced, so a
-   * redundant one is cheap. (`LockSupport.unpark` and NIO's `Selector.wakeup` are sticky the
-   * same way.)
+   * The wake-up (an eventfd write, or an `EVFILT_USER` trigger on kqueue) stays pending, so the
+   * next poll returns at once with `Complete` and the worker takes the "polled" exit, which
+   * keeps the pool's counters balanced; it is debounced, so a redundant one is cheap.
+   * (`LockSupport.unpark` and NIO's `Selector.wakeup` are sticky the same way.)
    */
   def interrupt(targetThread: Thread, targetPoller: Poller): Unit =
     targetPoller.interrupt()
