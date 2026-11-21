@@ -142,11 +142,11 @@ private[effect] object EpollEventLoop {
             if (again != seen) {
               // if the owner already took cb it completes it too; the second completion is a
               // no-op, and it has counted the success
-              if (callback.compareAndSet(cb, null)) succeeded.incrementAndGet()
+              if (callback.compareAndSet(cb, null)) { succeeded.incrementAndGet(); () }
               Right(again)
             } else
               Left(Some(IO {
-                if (callback.compareAndSet(cb, null)) canceled.incrementAndGet()
+                if (callback.compareAndSet(cb, null)) { canceled.incrementAndGet(); () }
                 ()
               }))
           }

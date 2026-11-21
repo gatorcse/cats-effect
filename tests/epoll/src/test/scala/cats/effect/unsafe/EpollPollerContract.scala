@@ -158,6 +158,7 @@ abstract class EpollPollerContract extends FunSuite with PollerTestPlatform {
       while (p.wakeupWriteCount < 3 && System.nanoTime() < deadline) {
         p.poll(0)
         p.processReadyEvents()
+        ()
       }
       p.close()
       stop.set(true)
